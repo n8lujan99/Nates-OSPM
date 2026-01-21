@@ -1,0 +1,6 @@
+name = NGC_6822
+ra_deg = 296.2358
+dec_deg = -14.7892
+pa_deg = 65
+distance_kpc = 459
+source = McConnachie 2012

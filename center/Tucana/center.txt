@@ -1,0 +1,6 @@
+name = Tucana
+ra_deg = 343.0625
+dec_deg = -64.4183
+pa_deg = nan
+distance_kpc = 887
+source = McConnachie 2012

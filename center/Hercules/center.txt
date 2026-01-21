@@ -1,0 +1,6 @@
+name = Hercules
+ra_deg = 247.7583
+dec_deg = 12.7917
+pa_deg = nan
+distance_kpc = 132
+source = McConnachie 2012

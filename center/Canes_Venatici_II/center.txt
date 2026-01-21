@@ -1,0 +1,6 @@
+name = Canes_Venatici_II
+ra_deg = 194.2925
+dec_deg = 34.3225
+pa_deg = nan
+distance_kpc = 160
+source = McConnachie 2012

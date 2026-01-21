@@ -1,0 +1,6 @@
+name = Reticulum_II
+ra_deg = 53.9250
+dec_deg = -54.0500
+pa_deg = nan
+distance_kpc = 32
+source = Bechtol et al. 2015

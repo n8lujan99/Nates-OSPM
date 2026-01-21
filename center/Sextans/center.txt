@@ -1,0 +1,6 @@
+name = Sextans
+ra_deg = 153.2625
+dec_deg = -1.6147
+pa_deg = 56
+distance_kpc = 86
+source = McConnachie 2012

@@ -1,0 +1,6 @@
+name = Andromeda_I
+ra_deg = 11.4167
+dec_deg = 38.0333
+pa_deg = nan
+distance_kpc = 745
+source = McConnachie 2012

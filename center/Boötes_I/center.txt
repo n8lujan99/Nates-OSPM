@@ -1,0 +1,6 @@
+name = Boötes_I
+ra_deg = 210.0250
+dec_deg = 14.5000
+pa_deg = nan
+distance_kpc = 66
+source = McConnachie 2012

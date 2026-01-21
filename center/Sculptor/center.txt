@@ -1,0 +1,6 @@
+name = Sculptor
+ra_deg = 15.0392
+dec_deg = -33.7092
+pa_deg = 99
+distance_kpc = 86
+source = McConnachie 2012

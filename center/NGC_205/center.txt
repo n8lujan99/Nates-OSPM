@@ -1,0 +1,6 @@
+name = NGC_205
+ra_deg = 10.0917
+dec_deg = 41.6853
+pa_deg = 170
+distance_kpc = 824
+source = McConnachie 2012

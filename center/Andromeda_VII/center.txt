@@ -1,0 +1,6 @@
+name = Andromeda_VII
+ra_deg = 351.3333
+dec_deg = 50.6750
+pa_deg = nan
+distance_kpc = 763
+source = McConnachie 2012

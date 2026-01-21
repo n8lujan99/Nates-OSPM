@@ -1,0 +1,6 @@
+name = IC_1613
+ra_deg = 16.1992
+dec_deg = 2.1178
+pa_deg = nan
+distance_kpc = 760
+source = McConnachie 2012

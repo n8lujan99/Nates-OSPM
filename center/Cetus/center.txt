@@ -1,0 +1,6 @@
+name = Cetus
+ra_deg = 6.3833
+dec_deg = -11.0433
+pa_deg = nan
+distance_kpc = 780
+source = McConnachie 2012

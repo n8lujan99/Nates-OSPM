@@ -1,0 +1,6 @@
+name = Segue1
+ra_deg = 151.7667
+dec_deg = 16.0819
+pa_deg = nan
+distance_kpc = 23
+source = Simon et al. 2011

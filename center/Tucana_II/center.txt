@@ -1,0 +1,6 @@
+name = Tucana_II
+ra_deg = 343.0625
+dec_deg = -58.5683
+pa_deg = nan
+distance_kpc = 58
+source = Koposov et al. 2015

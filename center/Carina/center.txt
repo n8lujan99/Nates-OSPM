@@ -1,0 +1,6 @@
+name = Carina
+ra_deg = 100.4029
+dec_deg = -50.9661
+pa_deg = 65
+distance_kpc = 105
+source = McConnachie 2012

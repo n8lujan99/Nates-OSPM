@@ -1,0 +1,6 @@
+name = WLM
+ra_deg = 0.4917
+dec_deg = -15.4600
+pa_deg = nan
+distance_kpc = 985
+source = McConnachie 2012

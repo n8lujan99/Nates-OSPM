@@ -1,0 +1,6 @@
+name = Phoenix
+ra_deg = 27.8096
+dec_deg = -44.4444
+pa_deg = nan
+distance_kpc = 415
+source = McConnachie 2012
