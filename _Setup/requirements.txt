@@ -1,0 +1,8 @@
+pip==24.0
+numpy
+scipy
+pandas
+matplotlib
+astropy
+julia
+torch
