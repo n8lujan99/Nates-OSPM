@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -e
+
+# Activate venv if present (from workspace root)
+if [ -d "$(dirname "$0")/../.venv" ]; then
+    source "$(dirname "$0")/../.venv/bin/activate"
+fi
+
+# Move to pkg_v3 (one level up from button/)
+cd "$(dirname "$0")/.."
+
+# Run plotting script
+python -m pkg_v3.plot_analysis
+
