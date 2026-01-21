@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+set -e
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VENV_DIR="$ROOT_DIR/.venv"
+REQ_FILE="$ROOT_DIR/_Setup/requirements.txt"
+
+echo "[setup] OSPM root: $ROOT_DIR"
+
+# ----------------------------------------
+# Python check
+# ----------------------------------------
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "[setup] ERROR: python3 not found"
+    exit 1
+fi
+
+# ----------------------------------------
+# Create venv if missing
+# ----------------------------------------
+
+if [ ! -d "$VENV_DIR" ]; then
+    echo "[setup] No venv found — creating"
+    python3 -m venv "$VENV_DIR"
+else
+    echo "[setup] venv exists"
+fi
+
+# ----------------------------------------
+# Activate venv
+# ----------------------------------------
+
+source "$VENV_DIR/bin/activate"
+
+# ----------------------------------------
+# Ensure pip version
+# ----------------------------------------
+
+PIP_VER="$(pip --version | awk '{print $2}')"
+
+if [ "$PIP_VER" != "24.0" ]; then
+    echo "[setup] pip $PIP_VER found — upgrading to 24.0"
+    pip install --upgrade pip==24.0
+else
+    echo "[setup] pip version OK (24.0)"
+fi
+
+# ----------------------------------------
+# Verify requirements
+# ----------------------------------------
+
+echo "[setup] Verifying Python dependencies"
+
+python - <<EOF
+import sys
+
+required = [
+    "numpy",
+    "scipy",
+    "pandas",
+    "matplotlib",
+    "astropy",
+    "torch",
+]
+
+missing = []
+for pkg in required:
+    try:
+        __import__(pkg)
+    except ImportError:
+        missing.append(pkg)
+
+if missing:
+    print("[setup] Missing packages:", missing)
+    sys.exit(1)
+
+print("[setup] All required packages present")
+EOF
+
+# ----------------------------------------
+# Optional sanity check
+# ----------------------------------------
+
+python "$ROOT_DIR/_Setup/__init__.py"
+
+echo "[setup] Environment ready"

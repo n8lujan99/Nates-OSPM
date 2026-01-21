@@ -1,0 +1,35 @@
+Segue1/
+├── galaxy.params        # Galaxy geometry & photometric config
+├── halo.dat             # Halo model definition
+├── SBprof.dat           # Surface brightness or luminosity data
+├── vels.dat             # Observed kinematics
+├── OSPM/                # Python package (modules)
+└── Orca.py              # Entry script
+
+
+vels.dat in segue/data
+
+
+Methods Orbit super position modeling 
+
+
+Translate the fortran equations 
+change past to historical and move it to before methods 
+change the title of 
+Draco and Segue should be different chapters 
+
+
+I could do a paper on draco and do that as my thesis 
+
+Or 
+
+I could expand on dark matter modeling exposing how much of the univse is black holes or x 
+
+
+What if instead of the black holes at the center of a galaxy 
+
+chapter after draco 
+
+should be analysis 
+
+chapter 7 we can start talking about pbhs axions and other lines of evidence as extra chapters 

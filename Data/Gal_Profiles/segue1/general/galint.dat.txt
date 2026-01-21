@@ -1,0 +1,3 @@
+galint.dat
+"" "intmom.out" 0.04 1500. 0. 3.2 10 0
+"gherm.out"

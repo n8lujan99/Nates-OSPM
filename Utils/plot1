@@ -3,10 +3,13 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Activate venv if present
+# Activate venv
 if [ -d "$ROOT/.venv" ]; then
     source "$ROOT/.venv/bin/activate"
 fi
+
+# THIS is the missing line
+export PYTHONPATH="$ROOT"
 
 cd "$ROOT"
 

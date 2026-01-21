@@ -1,0 +1,15 @@
+# virtual env
+.venv/
+
+# python junk
+__pycache__/
+*.pyc
+
+# data products / run outputs
+Data/Gal_Profiles/**/Dump/
+Data/Gal_Profiles/**/Testing/
+Data/Gal_Profiles/**/checkpoint/
+Data/Gal_Profiles/**/logs/
+
+# OS files
+.DS_Store

@@ -1,0 +1,17 @@
+    8745 Velocity file                                                                                
+j2                                                                                                    
+    6678 MEAN VELOCITY                                                                                
+   210.130005                                                                                         
+   18686 RANGE OF RADII (ARCMINS)                                                                     
+  0.500000000       1.50000000                                                                        
+login2.ls6(1067)$ cat srotate.def
+   24067 Initial guess for the PA                                                                     
+   245.000000                                                                                         
+   12559 Fix (0) or Fit (1) PA                                                                        
+           0                                                                                          
+    5213 Input file                                                                                   
+j2                                                                                                    
+   19257 mean velocity to use                                                                         
+   210.130005                                                                                         
+   64777 Number of stars per bin and min number                                                       
+          21          15  
