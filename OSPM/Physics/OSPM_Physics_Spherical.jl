@@ -78,10 +78,20 @@ function build_halo_context(rho_s, r_s, MBH, halo_type; nR=256, rmax_factor=300.
 end
 
 function get_halo_context(rho_s, r_s, MBH, halo_type; nR::Int=256, rmax_factor::Float64=300.0)
-    ht=Symbol(lowercase(String(halo_type))); key=(f64(rho_s),f64(r_s),f64(MBH),ht,nR,f64(rmax_factor))
-    ctx=get(_HALO_CTX_CACHE,key,nothing); ctx!==nothing && return ctx
-    ctx=build_halo_context(rho_s,r_s,MBH,ht; nR=nR, rmax_factor=rmax_factor); _HALO_CTX_CACHE[key]=ctx; ctx
+    ht = Symbol(lowercase(String(halo_type)))
+    key = (f64(rho_s), f64(r_s), f64(MBH), ht, nR, f64(rmax_factor))
+
+    lock(_HALO_LOCK)
+    ctx = get(_HALO_CTX_CACHE, key, nothing)
+    if ctx === nothing
+        ctx = build_halo_context(rho_s, r_s, MBH, ht; nR=nR, rmax_factor=rmax_factor)
+        _HALO_CTX_CACHE[key] = ctx
+    end
+    unlock(_HALO_LOCK)
+
+    return ctx
 end
+
 
 function mass_enclosed_two_radii(r_in::Float64, r_out::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String)
     ctx=get_halo_context(rho_s,r_s,MBH,halo_type); rin=max(r_in,f64(ctx.halo[:rmin])); rout=max(r_out,rin*1.001)
@@ -270,7 +280,7 @@ function evaluate_batch_theta(
         θ = getθ(i)
         try
             rho_s = θ[1]; r_s = θ[2]; MBH = dim ≥ 3 ? θ[3] : 0.0
-            A = build_A_matrix_julia(nothing, nothing, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type)
+            A = build_A_matrix_julia((π/2,), 0.0, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type)
             v = sum(abs2, A)
             if isfinite(v); status[i]=0; chi2[i]=v
             else; status[i]=2; chi2[i]=Inf

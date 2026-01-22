@@ -253,7 +253,10 @@ def run_daemon(config, physics_engine):
             fixer.unlock(deck,runner)
             if chi2<best: best=chi2
             runs+=1
-            if flat.flat(): return
+            if flat.flat(): 
+                deck.save()
+                print(f"[Daemon] Terminating early due to flat region detected after {runs} runs.")
+                return
         runner.train(deck)
 
     deck.save()
