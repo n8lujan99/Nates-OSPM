@@ -1,50 +1,44 @@
-# data_prep/DATA_NEW_GAL.py
+# Data/Data_Prep/DATA_NEW_GAL.py
 # Galaxy data preparation only
-# Running: python -m data_prep.DATA_NEW_GAL
+# Run with: python -m Data.Data_Prep.DATA_NEW_GAL
 
-from importlib import import_module
-
+from .Data_Config import CONFIG, PROFILE_ROOT
 from .Data_Paths import build_data_paths, ensure_data_dirs
 from .Data_Sources import build_sources_catalog
-from .Data_Preprocess import (
-    preprocess_stars_for_ospm,
-    quality_mask_from_config,
-    PREPROCESS_MODE,
-)
-
-# -------------------------------------------------------------------
-# CONFIG LOADING
-# -------------------------------------------------------------------
-# This script runs ONE galaxy per environment.
-# The active galaxy is defined by which config module is imported.
-
-# Example expected module:
-# Data.Gal_Profiles.Draco.Draco_OSPM_Config
-
-CFG = import_module("Data.Gal_Profiles.Draco.Draco_OSPM_Config")
-CONFIG = CFG.CONFIG
-PROFILE_ROOT = CFG.PROFILE_ROOT
-
+from .Data_Preprocess import ( preprocess_stars_for_ospm, quality_mask_from_config, PREPROCESS_MODE)
 
 # -------------------------------------------------------------------
 def main(*, run_label="default", write=True):
 
-    # Paths
     paths = build_data_paths(PROFILE_ROOT, run_label=run_label)
     ensure_data_dirs(paths)
 
+    # ------------------------------------------------------------
     # Raw catalog
-    df_raw = build_sources_catalog(PROFILE_ROOT=PROFILE_ROOT, scratch=not write)
+    # ------------------------------------------------------------
+    df_raw = build_sources_catalog(
+        PROFILE_ROOT=PROFILE_ROOT,
+        CONFIG=CONFIG,
+        scratch=not write,
+    )
     print(f"[DATA] raw sources: {len(df_raw)} rows")
+    print(df_raw.columns.tolist())
+    for c in ["vlos","vlos_err","ra","dec","src"]:
+        if c in df_raw: 
+            print(c, df_raw[c].isna().sum(), "NaN /", len(df_raw))
+        else:
+            print(c, "MISSING COLUMN")
 
-    # Quality mask
+    if "vlos" in df_raw:
+        print("finite vlos:", int((~df_raw["vlos"].isna()).sum()))
+    if "vlos" in df_raw and "vlos_err" in df_raw:
+        print("finite vlos & err:", int((~df_raw["vlos"].isna() & ~df_raw["vlos_err"].isna()).sum()))    # Quality mask (mode-controlled)
     qmask = (
         quality_mask_from_config(CONFIG)
         if PREPROCESS_MODE == "regular"
         else None
     )
 
-    # Geometry + cuts
     df_clean = preprocess_stars_for_ospm(
         df_raw,
         ra_col="ra",

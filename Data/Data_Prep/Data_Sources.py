@@ -224,28 +224,53 @@ def src_local_spec(p, *, scratch=False, build_if_missing=True):
 def build_sources_catalog(*, PROFILE_ROOT, CONFIG, scratch=False, collapse=True):
 
     paths = build_data_paths(PROFILE_ROOT)
-    DATA_CSV = paths["DATA_CSV"]
+    DATA_CSV  = paths["DATA_CSV"]
     SPEC_PATH = paths["SPEC_PATH"]
 
-    ra0 = CONFIG["RA0_DEG"]
-    dec0 = CONFIG["DEC0_DEG"]
+    ra0    = CONFIG["RA0_DEG"]
+    dec0   = CONFIG["DEC0_DEG"]
     radius = CONFIG["RADIUS_DEG"]
 
-    dfs = [
+    # ------------------------------------------------------------
+    # 1. Load spectroscopy FIRST (authoritative if present)
+    # ------------------------------------------------------------
+    spec = src_local_spec(SPEC_PATH, scratch=scratch)
+
+    dfs = []
+    has_spec = spec is not None and not spec.empty
+    if has_spec:
+        dfs.append(spec)
+
+    # ------------------------------------------------------------
+    # 2. Load cone-search catalogs
+    # ------------------------------------------------------------
+    dfs += [
         src_gaia(ra0_deg=ra0, dec0_deg=dec0, radius_deg=radius),
         src_sdss(ra0_deg=ra0, dec0_deg=dec0, radius_deg=radius),
         src_lamost(ra0_deg=ra0, dec0_deg=dec0, radius_deg=radius),
         src_apogee(ra0_deg=ra0, dec0_deg=dec0, radius_deg=radius),
-        src_local_spec(SPEC_PATH, scratch=scratch),
         src_simbad(ra0_deg=ra0, dec0_deg=dec0, radius_deg=radius),
     ]
 
     dfs = [d for d in dfs if d is not None and not d.empty]
-    raw = pd.concat(dfs, ignore_index=True, sort=False) if dfs else pd.DataFrame()
+    if not dfs:
+        return pd.DataFrame()
 
-    if raw.empty:
-        return raw
+    raw = pd.concat(dfs, ignore_index=True, sort=False)
 
+    # ------------------------------------------------------------
+    # 3. If spectroscopy exists, suppress Gaia-only RV-less rows
+    # ------------------------------------------------------------
+    if has_spec and "vlos" in raw:
+        raw = raw[
+            raw["src"].eq("local") |
+            raw["src"].ne("gaia") |
+            raw["vlos"].notna()
+        ].reset_index(drop=True)
+
+    # ------------------------------------------------------------
+    # 4. Persist
+    # ------------------------------------------------------------
     if not scratch:
         raw.to_csv(DATA_CSV, index=False)
 

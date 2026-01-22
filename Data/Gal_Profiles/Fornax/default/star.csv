@@ -1,0 +1,2 @@
+ra,dec,vlos,vlos_err,src,id,ruwe,parallax,parallax_err,pmra,pmra_err,pmdec,pmdec_err,x_pc,y_pc,r_pc,preprocess_mode
+40.03460099974,-35.01402130411,0.0,3.6,gaia,5.050082714835267e+18,1.007,1.4265,0.0132,-8.0,0.009,4.294,0.012,79.34063181018693,-1449.1247419927768,1451.2950953240597,dwarf

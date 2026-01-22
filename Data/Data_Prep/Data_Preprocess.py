@@ -52,10 +52,12 @@ def preprocess_stars_for_ospm(
         R=df["r_pc"].to_numpy()
 
     v=df[v_col].to_numpy()
-    df["vlos"]=v-np.nanmedian(v)
+    df["vlos"]=v
+    df["has_vlos"] = np.isfinite(df[v_col]) & (
+        np.isfinite(df[v_err_col]) if v_err_col is not None and v_err_col in df else True
+    )
+    m = np.isfinite(R)
 
-    m=np.isfinite(df["vlos"]) & np.isfinite(R)
-    if v_err_col is not None and v_err_col in df: m&=np.isfinite(df[v_err_col])
     if quality_mask is not None: m&=quality_mask(df)
     if r_max_pc is not None: m&=(R<=r_max_pc)
 
