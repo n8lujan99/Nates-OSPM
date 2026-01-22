@@ -8,7 +8,7 @@ Invariants:
 - mode == "stellar"
 """
 import numpy as np
-from ..physics.OSPM_Physics import pc, kms, make_inclination
+from ..Physics.OSPM_Physics import pc, kms, make_inclination
 class OSPMObservablesStellar:
     def __init__(self, *, R_star_pc, v_star_kms, verr_star_kms, has_vlos, inclination_deg, Norbit):
         self.mode = "stellar"

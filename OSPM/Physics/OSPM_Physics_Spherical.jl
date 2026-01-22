@@ -22,6 +22,8 @@ struct HaloContext
 end
 
 const _HALO_CTX_CACHE = Dict{Tuple{Float64,Float64,Float64,Symbol,Int,Float64},HaloContext}()
+const _HALO_LOCK = ReentrantLock()
+
 reset_orbit_cache() = (empty!(_HALO_CTX_CACHE); @info "OSPM: halo context cache cleared"; nothing)
 
 @inline function normalize_halo(halo)
