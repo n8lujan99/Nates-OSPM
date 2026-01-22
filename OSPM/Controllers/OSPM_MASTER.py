@@ -11,8 +11,8 @@ Currently supports STELLAR mode only.
 """
 # NO Variables defined here
 
-from .observables.OSPM_Observables_Stellar import OSPMObservablesStellar
-from .solvers.OSPM_Solver_stellar import solve_ospm_theta_stellar
+from ..Observables.OSPM_Observables_Stellar import OSPMObservablesStellar
+from ..Solvers.OSPM_Solver_Stellar import solve_ospm_theta_stellar
 
 def build_observables(config):
     return OSPMObservablesStellar.from_star_table(

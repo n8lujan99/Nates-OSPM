@@ -1,28 +1,20 @@
 #!/usr/bin/env bash
 set -e
 
-if [ ! -d ".venv" ]; then
-    echo "ERROR: .venv not found. Create it with:"
-    echo "  python -m venv .venv"
+GALAXY="$1"
+if [ -z "$GALAXY" ]; then
+    echo "Usage: bash Utils/start <GalaxyName>"
     exit 1
 fi
 
-source .venv/bin/activate
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+echo "[START] Repo root: $ROOT"
+echo "[START] Galaxy: $GALAXY"
 
-REQUIRED_PIP="24.0"
-CURRENT_PIP=$(pip --version | awk '{print $2}')
-
-if [ "$CURRENT_PIP" != "$REQUIRED_PIP" ]; then
-    echo "ERROR: pip version $CURRENT_PIP detected, expected $REQUIRED_PIP"
-    echo "Run:"
-    echo "  pip install --upgrade pip==$REQUIRED_PIP"
-    exit 1
-fi
+source "$ROOT/.venv/bin/activate"
 
 export PYJULIA_USE_PYTHONCALL=1
 export OSPM_USE_JULIA=1
+export PYTHONPATH="$ROOT"
 
-# FIXED
-export PYTHONPATH="$(pwd)"
-
-python -m OSPM.OSPM_RUN
+python -m OSPM.Controllers.OSPM_RUN "$GALAXY"

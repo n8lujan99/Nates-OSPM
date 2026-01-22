@@ -5,7 +5,7 @@
 import os
 import datetime
 import pandas as pd
-from .Gal_Registry import load_config
+from ..Gal_Registry import load_config
 
 def get_active_galaxy():
     gal = os.environ.get("OSPM_GALAXY")

@@ -3,7 +3,7 @@
 # NO Variables defined here
 import numpy as np
 import torch
-from OSPM_Daemon import run_daemon
+from ..AI.OSPM_Daemon import run_daemon
 
 class OSPM_API:
     def __init__(self, config):
