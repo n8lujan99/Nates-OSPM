@@ -1,6 +1,6 @@
-name = Fornax
-ra_deg = 39.9971
-dec_deg = -34.4492
-pa_deg = 41
-distance_kpc = 147
-source = McConnachie 2012
+RA0_DEG 39.9971
+DEC0_DEG -34.4492
+DISTANCE_PC 147000.0
+R_HALF_LIGHT_PC 710
+AXIS_RATIO_Q 1.0
+PA_DEG 41.0

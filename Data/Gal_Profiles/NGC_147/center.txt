@@ -1,6 +1,6 @@
-name = NGC_147
-ra_deg = 8.3000
-dec_deg = 48.5083
-pa_deg = 36
-distance_kpc = 712
-source = McConnachie 2012
+RA0_DEG 8.3
+DEC0_DEG 48.5083
+DISTANCE_PC 712000.0
+R_HALF_LIGHT_PC 672
+AXIS_RATIO_Q 1.0
+PA_DEG 36.0

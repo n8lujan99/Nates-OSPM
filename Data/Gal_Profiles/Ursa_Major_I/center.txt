@@ -1,6 +1,5 @@
-name = Ursa_Major_I
-ra_deg = 158.7230
-dec_deg = 51.9200
-pa_deg = nan
-distance_kpc = 97
-source = McConnachie 2012
+RA0_DEG 158.723
+DEC0_DEG 51.92
+DISTANCE_PC 97000.0
+R_HALF_LIGHT_PC 319
+AXIS_RATIO_Q 1.0

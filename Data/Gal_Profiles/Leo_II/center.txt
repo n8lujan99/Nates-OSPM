@@ -1,6 +1,6 @@
-name = Leo_II
-ra_deg = 168.3708
-dec_deg = 22.1517
-pa_deg = 13
-distance_kpc = 233
-source = McConnachie 2012
+RA0_DEG 168.3708
+DEC0_DEG 22.1517
+DISTANCE_PC 233000.0
+R_HALF_LIGHT_PC 176
+AXIS_RATIO_Q 1.0
+PA_DEG 13.0

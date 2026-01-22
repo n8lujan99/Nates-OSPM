@@ -1,6 +1,6 @@
-name = NGC_185
-ra_deg = 9.7417
-dec_deg = 48.3375
-pa_deg = 25
-distance_kpc = 620
-source = McConnachie 2012
+RA0_DEG 9.7417
+DEC0_DEG 48.3375
+DISTANCE_PC 620000.0
+R_HALF_LIGHT_PC 590
+AXIS_RATIO_Q 1.0
+PA_DEG 25.0

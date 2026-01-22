@@ -1,6 +1,5 @@
-name = Segue2
-ra_deg = 34.8167
-dec_deg = 20.1750
-pa_deg = nan
-distance_kpc = 35
-source = Belokurov et al. 2009
+RA0_DEG 34.8167
+DEC0_DEG 20.175
+DISTANCE_PC 35000.0
+R_HALF_LIGHT_PC 34
+AXIS_RATIO_Q 1.0

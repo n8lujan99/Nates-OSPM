@@ -1,6 +1,5 @@
-name = WLM
-ra_deg = 0.4917
-dec_deg = -15.4600
-pa_deg = nan
-distance_kpc = 985
-source = McConnachie 2012
+RA0_DEG 0.4917
+DEC0_DEG -15.46
+DISTANCE_PC 985000.0
+R_HALF_LIGHT_PC 1650
+AXIS_RATIO_Q 1.0

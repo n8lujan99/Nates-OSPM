@@ -1,6 +1,5 @@
-name = Andromeda_III
-ra_deg = 21.5833
-dec_deg = 36.5000
-pa_deg = nan
-distance_kpc = 749
-source = McConnachie 2012
+RA0_DEG 21.5833
+DEC0_DEG 36.5
+DISTANCE_PC 749000.0
+R_HALF_LIGHT_PC 456
+AXIS_RATIO_Q 1.0

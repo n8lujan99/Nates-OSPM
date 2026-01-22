@@ -1,6 +1,6 @@
-name = Ursa_Minor
-ra_deg = 227.2854
-dec_deg = 67.2221
-pa_deg = 50
-distance_kpc = 76
-source = McConnachie 2012
+RA0_DEG 227.2854
+DEC0_DEG 67.2221
+DISTANCE_PC 76000.0
+R_HALF_LIGHT_PC 181
+AXIS_RATIO_Q 1.0
+PA_DEG 50.0

@@ -1,37 +1,37 @@
-name,ra_deg,dec_deg,pa_deg,distance_kpc,source
-Draco,260.0517,57.9153,88,76,McConnachie 2012
-Ursa_Minor,227.2854,67.2221,50,76,McConnachie 2012
-Sculptor,15.0392,-33.7092,99,86,McConnachie 2012
-Fornax,39.9971,-34.4492,41,147,McConnachie 2012
-Carina,100.4029,-50.9661,65,105,McConnachie 2012
-Sextans,153.2625,-1.6147,56,86,McConnachie 2012
-Leo_I,152.1146,12.3053,79,254,McConnachie 2012
-Leo_II,168.3708,22.1517,13,233,McConnachie 2012
-Sagittarius_dSph,283.8313,-30.5453,nan,26,McConnachie 2012
-Boötes_I,210.0250,14.5000,nan,66,McConnachie 2012
-Coma_Berenices,186.7458,23.9047,nan,44,McConnachie 2012
-Ursa_Major_I,158.7230,51.9200,nan,97,McConnachie 2012
-Ursa_Major_II,132.8720,63.1330,nan,32,McConnachie 2012
-Canes_Venatici_I,202.0146,33.5583,73,218,McConnachie 2012
-Canes_Venatici_II,194.2925,34.3225,nan,160,McConnachie 2012
-Hercules,247.7583,12.7917,nan,132,McConnachie 2012
-Segue1,151.7667,16.0819,nan,23,Simon et al. 2011
-Segue2,34.8167,20.1750,nan,35,Belokurov et al. 2009
-Reticulum_II,53.9250,-54.0500,nan,32,Bechtol et al. 2015
-Tucana_II,343.0625,-58.5683,nan,58,Koposov et al. 2015
-Eridanus_II,56.0875,-43.5333,nan,366,Crnojević et al. 2016
-Leo_T,143.7225,17.0514,nan,420,McConnachie 2012
-Phoenix,27.8096,-44.4444,nan,415,McConnachie 2012
-Cetus,6.3833,-11.0433,nan,780,McConnachie 2012
-Tucana,343.0625,-64.4183,nan,887,McConnachie 2012
-WLM,0.4917,-15.4600,nan,985,McConnachie 2012
-IC_1613,16.1992,2.1178,nan,760,McConnachie 2012
-NGC_6822,296.2358,-14.7892,65,459,McConnachie 2012
-Andromeda_I,11.4167,38.0333,nan,745,McConnachie 2012
-Andromeda_II,19.1250,33.4167,nan,652,McConnachie 2012
-Andromeda_III,21.5833,36.5000,nan,749,McConnachie 2012
-Andromeda_V,17.2500,47.6333,nan,774,McConnachie 2012
-Andromeda_VII,351.3333,50.6750,nan,763,McConnachie 2012
-NGC_147,8.3000,48.5083,36,712,McConnachie 2012
-NGC_185,9.7417,48.3375,25,620,McConnachie 2012
-NGC_205,10.0917,41.6853,170,824,McConnachie 2012
+name,ra_deg,dec_deg,pa_deg,distance_kpc,r_half_light_pc,source
+Draco,260.0517,57.9153,88,76,221,McConnachie 2012
+Ursa_Minor,227.2854,67.2221,50,76,181,McConnachie 2012
+Sculptor,15.0392,-33.7092,99,86,283,McConnachie 2012
+Fornax,39.9971,-34.4492,41,147,710,McConnachie 2012
+Carina,100.4029,-50.9661,65,105,250,McConnachie 2012
+Sextans,153.2625,-1.6147,56,86,695,McConnachie 2012
+Leo_I,152.1146,12.3053,79,254,251,McConnachie 2012
+Leo_II,168.3708,22.1517,13,233,176,McConnachie 2012
+Sagittarius_dSph,283.8313,-30.5453,nan,26,1550,McConnachie 2012
+Boötes_I,210.0250,14.5000,nan,66,242,McConnachie 2012
+Coma_Berenices,186.7458,23.9047,nan,44,77,McConnachie 2012
+Ursa_Major_I,158.7230,51.9200,nan,97,319,McConnachie 2012
+Ursa_Major_II,132.8720,63.1330,nan,32,149,McConnachie 2012
+Canes_Venatici_I,202.0146,33.5583,73,218,564,McConnachie 2012
+Canes_Venatici_II,194.2925,34.3225,nan,160,74,McConnachie 2012
+Hercules,247.7583,12.7917,nan,132,330,McConnachie 2012
+Segue1,151.7667,16.0819,nan,23,29,Simon et al. 2011
+Segue2,34.8167,20.1750,nan,35,34,Belokurov et al. 2009
+Reticulum_II,53.9250,-54.0500,nan,32,58,Bechtol et al. 2015
+Tucana_II,343.0625,-58.5683,nan,58,165,Koposov et al. 2015
+Eridanus_II,56.0875,-43.5333,nan,366,277,Crnojević et al. 2016
+Leo_T,143.7225,17.0514,nan,420,170,McConnachie 2012
+Phoenix,27.8096,-44.4444,nan,415,454,McConnachie 2012
+Cetus,6.3833,-11.0433,nan,780,1220,McConnachie 2012
+Tucana,343.0625,-64.4183,nan,887,284,McConnachie 2012
+WLM,0.4917,-15.4600,nan,985,1650,McConnachie 2012
+IC_1613,16.1992,2.1178,nan,760,1720,McConnachie 2012
+NGC_6822,296.2358,-14.7892,65,459,680,McConnachie 2012
+Andromeda_I,11.4167,38.0333,nan,745,672,McConnachie 2012
+Andromeda_II,19.1250,33.4167,nan,652,1176,McConnachie 2012
+Andromeda_III,21.5833,36.5000,nan,749,456,McConnachie 2012
+Andromeda_V,17.2500,47.6333,nan,774,292,McConnachie 2012
+Andromeda_VII,351.3333,50.6750,nan,763,775,McConnachie 2012
+NGC_147,8.3000,48.5083,36,712,672,McConnachie 2012
+NGC_185,9.7417,48.3375,25,620,590,McConnachie 2012
+NGC_205,10.0917,41.6853,170,824,590,McConnachie 2012

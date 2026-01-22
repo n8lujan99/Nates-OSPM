@@ -1,6 +1,5 @@
-name = Andromeda_V
-ra_deg = 17.2500
-dec_deg = 47.6333
-pa_deg = nan
-distance_kpc = 774
-source = McConnachie 2012
+RA0_DEG 17.25
+DEC0_DEG 47.6333
+DISTANCE_PC 774000.0
+R_HALF_LIGHT_PC 292
+AXIS_RATIO_Q 1.0

@@ -1,6 +1,5 @@
-name = Sagittarius_dSph
-ra_deg = 283.8313
-dec_deg = -30.5453
-pa_deg = nan
-distance_kpc = 26
-source = McConnachie 2012
+RA0_DEG 283.8313
+DEC0_DEG -30.5453
+DISTANCE_PC 26000.0
+R_HALF_LIGHT_PC 1550
+AXIS_RATIO_Q 1.0

@@ -1,6 +1,5 @@
-name = Coma_Berenices
-ra_deg = 186.7458
-dec_deg = 23.9047
-pa_deg = nan
-distance_kpc = 44
-source = McConnachie 2012
+RA0_DEG 186.7458
+DEC0_DEG 23.9047
+DISTANCE_PC 44000.0
+R_HALF_LIGHT_PC 77
+AXIS_RATIO_Q 1.0

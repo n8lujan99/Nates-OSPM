@@ -1,6 +1,5 @@
-name = Phoenix
-ra_deg = 27.8096
-dec_deg = -44.4444
-pa_deg = nan
-distance_kpc = 415
-source = McConnachie 2012
+RA0_DEG 27.8096
+DEC0_DEG -44.4444
+DISTANCE_PC 415000.0
+R_HALF_LIGHT_PC 454
+AXIS_RATIO_Q 1.0

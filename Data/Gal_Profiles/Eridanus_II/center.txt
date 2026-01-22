@@ -1,6 +1,5 @@
-name = Eridanus_II
-ra_deg = 56.0875
-dec_deg = -43.5333
-pa_deg = nan
-distance_kpc = 366
-source = Crnojević et al. 2016
+RA0_DEG 56.0875
+DEC0_DEG -43.5333
+DISTANCE_PC 366000.0
+R_HALF_LIGHT_PC 277
+AXIS_RATIO_Q 1.0
