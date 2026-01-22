@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -e
 
-# -------------------------------
-# Activate venv
-# -------------------------------
 if [ ! -d ".venv" ]; then
     echo "ERROR: .venv not found. Create it with:"
     echo "  python -m venv .venv"
@@ -12,9 +9,6 @@ fi
 
 source .venv/bin/activate
 
-# -------------------------------
-# Enforce known-good pip
-# -------------------------------
 REQUIRED_PIP="24.0"
 CURRENT_PIP=$(pip --version | awk '{print $2}')
 
@@ -25,19 +19,10 @@ if [ "$CURRENT_PIP" != "$REQUIRED_PIP" ]; then
     exit 1
 fi
 
-# -------------------------------
-# Julia ↔ Python bridge
-# -------------------------------
 export PYJULIA_USE_PYTHONCALL=1
 export OSPM_USE_JULIA=1
 
-# -------------------------------
-# Python module path
-# -------------------------------
-export PYTHONPATH="$(pwd)/pkg_v3"
+# FIXED
+export PYTHONPATH="$(pwd)"
 
-# -------------------------------
-# Run
-# -------------------------------
-
-python -m pkg_v3.OSPM_RUN
+python -m OSPM.OSPM_RUN
