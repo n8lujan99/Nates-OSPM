@@ -5,8 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-DECK_ROOT = "/home/n8lujan99/research/github/Nates-OSPM/Data/Gal_Profiles/Draco/Dump"
-DECK_NAME = "daemon_deck_First_halo"
+DECK_ROOT = "/home/n8lujan99/research/github/Nates-OSPM/Data/Gal_Profiles/Segue1/default"
+DECK_NAME = "daemon_deck.csv"
 #DECK_NAME = "daemon_deck_nohalo"
 #DECK_NAME = "daemon_deck_smallerbhandlargerr_0"
 #DECK_NAME = "Draco_daemon_deck_TESTING"
