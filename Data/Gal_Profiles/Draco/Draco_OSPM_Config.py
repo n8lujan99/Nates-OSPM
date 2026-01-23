@@ -3,7 +3,7 @@
 # that way other modules can remain Galaxy-agnostic
 from pathlib import Path
 import pathlib
-from data_prep.Data_Paths import build_data_paths
+from Data.Data_Prep.Data_Paths import build_data_paths
 
 
 Galaxy = "Draco"
