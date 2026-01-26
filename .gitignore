@@ -11,5 +11,9 @@ Data/Gal_Profiles/**/Testing/
 Data/Gal_Profiles/**/checkpoint/
 Data/Gal_Profiles/**/logs/
 
+# Windows NTFS alternate data streams
+*:Zone.Identifier
+*Zone.Identifier
+
 # OS files
 .DS_Store
