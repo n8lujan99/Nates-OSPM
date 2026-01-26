@@ -1,48 +1,33 @@
 # Data_Prep/Data_Sources.py
 # Source catalog construction (Gaia + spectroscopy + databases)
 # Geometry is injected at runtime. No solver-layer imports.
-
 import os
 import numpy as np
 import pandas as pd
-
 import astropy.units as u
 import astropy.coordinates as coord
-
 from astroquery.vizier import Vizier
 from astroquery.simbad import Simbad
 from astroquery.ned import Ned
-
 from .Data_Paths import build_data_paths
 from .Data_Asmbl import assemble_source
-
 
 # ------------------------------------------------------------
 def frac_err(v, e):
     return np.abs(e / v) if np.isfinite(v) and v != 0 else np.inf
-
-
 # ------------------------------------------------------------
 # Cone-search helpers (geometry injected)
 # ------------------------------------------------------------
 def src_gaia(*, ra0_deg, dec0_deg, radius_deg):
     Vizier.ROW_LIMIT = -1
-    v = Vizier(columns=[
-        "Source", "RA_ICRS", "DE_ICRS",
-        "Plx", "e_Plx",
-        "pmRA", "e_pmRA",
-        "pmDE", "e_pmDE",
-        "RV", "e_RV",
-        "RUWE"
-    ])
+    v = Vizier(columns=[  "Source", "RA_ICRS", "DE_ICRS", "Plx", "e_Plx",
+        "pmRA", "e_pmRA", "pmDE", "e_pmDE", "RV", "e_RV", "RUWE"])
     c = coord.SkyCoord(ra0_deg * u.deg, dec0_deg * u.deg)
     r = v.query_region(c, radius=radius_deg * u.deg, catalog="I/355/gaiadr3")
     if not r:
         return pd.DataFrame()
-
     df = r[0].to_pandas().rename(columns={"Source": "id"})
     out = assemble_source(df, src="gaia")
-
     if "id" in df:
         out["id"] = df["id"].to_numpy()
     if "RUWE" in df:
@@ -56,9 +41,7 @@ def src_gaia(*, ra0_deg, dec0_deg, radius_deg):
     if "pmDE" in df:
         out["pmdec"] = pd.to_numeric(df["pmDE"], errors="coerce").to_numpy()
         out["pmdec_err"] = pd.to_numeric(df.get("e_pmDE", np.nan), errors="coerce").to_numpy()
-
     return out
-
 
 def src_simbad(*, ra0_deg, dec0_deg, radius_deg):
     s = Simbad()
@@ -67,13 +50,11 @@ def src_simbad(*, ra0_deg, dec0_deg, radius_deg):
     r = s.query_region(c, radius=radius_deg * u.deg)
     if r is None:
         return pd.DataFrame()
-
     df = r.to_pandas()
     out = assemble_source(df, src="simbad", parse_sexagesimal=True)
     if "OTYPE" in df:
         out["otype"] = df["OTYPE"].astype(str).to_numpy()
     return out
-
 
 def _vizier_cone(cols, catalog, src, *, ra0_deg, dec0_deg, radius_deg):
     Vizier.ROW_LIMIT = -1
@@ -84,14 +65,12 @@ def _vizier_cone(cols, catalog, src, *, ra0_deg, dec0_deg, radius_deg):
         return pd.DataFrame()
     return assemble_source(r[0].to_pandas(), src=src)
 
-
 def src_sdss(*, ra0_deg, dec0_deg, radius_deg):
     return _vizier_cone(
         ["RA_ICRS", "DE_ICRS", "RV", "e_RV"],
         "V/147/sdss12",
         "sdss",
-        ra0_deg=ra0_deg, dec0_deg=dec0_deg, radius_deg=radius_deg
-    )
+        ra0_deg=ra0_deg, dec0_deg=dec0_deg, radius_deg=radius_deg)
 
 
 def src_lamost(*, ra0_deg, dec0_deg, radius_deg):

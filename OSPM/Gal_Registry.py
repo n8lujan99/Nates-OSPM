@@ -2,7 +2,7 @@
 Galaxy registry and data loader.
 No hard-coded galaxy imports.
 CSV-driven capability detection.
-"""
+
 
 from pathlib import Path
 import importlib
@@ -91,3 +91,4 @@ def load_all_galaxies(skip=()):
         except Exception as e:
             out[gal] = dict(galaxy=gal, error=str(e))
     return out
+"""

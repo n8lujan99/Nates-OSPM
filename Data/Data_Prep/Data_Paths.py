@@ -1,17 +1,7 @@
 # Data/Data_Prep/Data_Paths.py
-
 from pathlib import Path
-
-
 def build_data_paths(PROFILE_ROOT: Path, *, run_label: str = "default"):
-    """
-    Build all filesystem paths for a single galaxy run.
-
-    PROFILE_ROOT:
-        Data/Gal_Profiles/<Galaxy>
-    """
     base = PROFILE_ROOT / run_label
-
     return {
         "PROFILE_ROOT":     PROFILE_ROOT,
         "DATA_CSV":         base / "data.csv",
@@ -23,12 +13,7 @@ def build_data_paths(PROFILE_ROOT: Path, *, run_label: str = "default"):
         "LOG_PATH":         base / "ospm.log",
         "CHECKPOINT_DIR":   base / "checkpoints",
     }
-
-
 def ensure_data_dirs(paths):
-    """
-    Create directories for all Path entries in paths.
-    """
     for p in paths.values():
         if isinstance(p, Path):
             if p.suffix:

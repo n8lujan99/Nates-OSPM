@@ -2,202 +2,69 @@ from __future__ import annotations
 import numpy as np
 from scipy.optimize import minimize
 from ..Physics.OSPM_Physics import build_A_matrix_stellar_julia
+from ..Physics.OSPM_PhysicsEngine import chi2_resolution_penalty, mass_slope_penalty
 
-def _as_1d_float(x, name: str) -> np.ndarray:
-    a = np.asarray(x, dtype=float).reshape(-1)
-    if a.size == 0:
-        raise ValueError(f"{name} is empty")
-    if not np.all(np.isfinite(a)):
-        raise ValueError(f"{name} contains non-finite values")
+def _as_1d_float(x,name):
+    a=np.asarray(x,float).reshape(-1)
+    if a.size==0 or not np.all(np.isfinite(a)): raise ValueError(f"{name} invalid")
     return a
 
-def stellar_log_likelihood(
-    A: np.ndarray,
-    w: np.ndarray,
-    *,
-    verr_star_mps: np.ndarray,
-    rv_mask: np.ndarray,
-    Nstar: int,
-    Nocc: int,
-    lambda_occ: float = 1.0,
-    eps: float = 1e-300,
-    sigma_floor_mps: float = 2e3
-) -> float:
-    A = np.asarray(A, float)
-    w = _as_1d_float(w, "w")
-    if A.ndim != 2:
-        raise ValueError("A must be 2D")
-    if A.shape[1] != w.size:
-        raise ValueError(f"A.shape[1]={A.shape[1]} != len(w)={w.size}")
-    if Nstar + Nocc != A.shape[0]:
-        raise ValueError(f"Nstar+Nocc={Nstar+Nocc} does not match A rows={A.shape[0]}")
-    p = A @ w
-    p = np.maximum(p, float(eps))
-    # --- RV likelihood on subset only ---
-    logL_star = 0.0
-    if Nstar > 0:
-        rv_mask = np.asarray(rv_mask, bool).reshape(-1)
-        if rv_mask.size != Nstar:
-            raise ValueError("rv_mask length must match Nstar")
+def stellar_log_likelihood(A,w,*,verr_star_mps,rv_mask,Nstar,Nocc,lambda_occ=1.0,eps=1e-300,sigma_floor_mps=2e3):
+    A=np.asarray(A,float); w=_as_1d_float(w,"w")
+    if A.ndim!=2 or A.shape[1]!=w.size or A.shape[0]!=Nstar+Nocc: raise ValueError("A shape mismatch")
+    p=np.maximum(A@w,eps)
+    ll=0.0
+    if Nstar>0:
+        rv_mask=np.asarray(rv_mask,bool)
+        if rv_mask.size!=Nstar: raise ValueError("rv_mask mismatch")
         if rv_mask.any():
-            p_star = p[:Nstar][rv_mask]
-            sigma  = np.asarray(verr_star_mps, float).reshape(-1)[rv_mask]
-            sigma  = np.nan_to_num(sigma, nan=np.inf, posinf=np.inf, neginf=np.inf)
-            sigma  = np.maximum(sigma, float(sigma_floor_mps))
-            p_star = np.maximum(p_star * sigma, float(eps))
-            logL_star = float(np.sum(np.log(p_star)))
-    # --- occupancy likelihood always on occupancy rows ---
-    if Nocc == 0:
-        return logL_star
-    p_occ = np.maximum(p[Nstar:], float(eps))
-    logL_occ = float(np.sum(np.log(p_occ)))
-    return logL_star + float(lambda_occ) * logL_occ
+            sig=np.asarray(verr_star_mps,float)[rv_mask]
+            sig=np.maximum(np.nan_to_num(sig,np.inf),sigma_floor_mps)
+            ll+=float(np.sum(np.log(np.maximum(p[:Nstar][rv_mask]*sig,eps))))
+    if Nocc>0: ll+=float(lambda_occ)*float(np.sum(np.log(np.maximum(p[Nstar:],eps))))
+    return ll
 
-def solve_weights_stellar(
-    A: np.ndarray,
-    *,
-    verr_star_mps: np.ndarray,
-    rv_mask: np.ndarray,
-    Nstar: int,
-    Nocc: int,
-    lambda_occ: float = 1.0,
-    alpha: float = 1e-3,
-    eps: float = 1e-300,
-    maxiter: int = 500,
-    maxfun: int = 20000,
-    p0_floor: float = 1e-15
-) -> np.ndarray:
-    A = np.asarray(A, float)
-    Norbit = int(A.shape[1])
-    alpha_eff = float(alpha) * (Norbit / 200.0) * (max(Nstar, 1) / 90.0)
-    w0 = np.random.rand(Norbit)
-    w0 += 1e-3
-    w0 /= w0.sum()
-    # Scale rows using only "active" rows:
-    # RV rows where rv_mask True plus all occupancy rows.
-    rv_mask = np.asarray(rv_mask, bool).reshape(-1)
-    if rv_mask.size != Nstar:
-        raise ValueError("rv_mask length must match Nstar")
-    
-    active_rows = np.concatenate([rv_mask, np.ones(int(Nocc), dtype=bool)]) if (Nocc > 0) else rv_mask.copy()
-    
-    if active_rows.size != A.shape[0]:
-        raise ValueError("active_rows length mismatch")
-    
-    p0 = A @ w0
-    p0_active = p0[active_rows]
-    scale_active = 1.0 / np.maximum(p0_active, float(p0_floor))
-    A_eff = A.copy()
-    A_eff[active_rows, :] *= scale_active[:, None]
-    bounds = [(0.0, None)] * Norbit
+def solve_weights_stellar(A,*,verr_star_mps,rv_mask,Nstar,Nocc,lambda_occ=1.0,alpha=1e-3,eps=1e-300,maxiter=500,maxfun=20000,p0_floor=1e-15):
+    A=np.asarray(A,float); Norbit=A.shape[1]
+    alpha*=Norbit/200.0*max(Nstar,1)/90.0
+    w0=np.random.rand(Norbit)+1e-3; w0/=w0.sum()
+    rv_mask=np.asarray(rv_mask,bool)
+    active=np.concatenate([rv_mask,np.ones(Nocc,bool)]) if Nocc>0 else rv_mask
+    p0=A@w0; scale=1.0/np.maximum(p0[active],p0_floor)
+    Aeff=A.copy(); Aeff[active]*=scale[:,None]
+    bounds=[(0.0,None)]*Norbit
 
-    def objective(w: np.ndarray) -> float:
-        ll = stellar_log_likelihood(
-            A_eff, w,
-            verr_star_mps=verr_star_mps,
-            rv_mask=rv_mask,
-            Nstar=Nstar, Nocc=Nocc,
-            lambda_occ=lambda_occ,
-            eps=eps
-        )
-        return -ll + alpha_eff * float(np.dot(w, w))
+    def obj(w):
+        ll=stellar_log_likelihood(Aeff,w,verr_star_mps=verr_star_mps,rv_mask=rv_mask,Nstar=Nstar,Nocc=Nocc,lambda_occ=lambda_occ,eps=eps)
+        return -ll+alpha*np.dot(w,w)
 
-    res = minimize(objective, w0, method="L-BFGS-B", bounds=bounds,
-                   options={"maxiter": int(maxiter), "maxfun": int(maxfun)})
+    res=minimize(obj,w0,method="L-BFGS-B",bounds=bounds,options={"maxiter":maxiter,"maxfun":maxfun})
+    if not res.success:
+        res=minimize(obj,w0,method="SLSQP",bounds=bounds,options={"maxiter":3*maxiter,"ftol":1e-9})
+        if not res.success: raise RuntimeError(f"Weight solve failed: {res.message}")
+    w=np.maximum(res.x,0.0); s=w.sum()
+    return w/s if s>0 else np.full(Norbit,1.0/Norbit)
 
-    if (not res.success) or (res.x is None):
-        res = minimize(objective, w0, method="SLSQP", bounds=bounds,
-                       options={"maxiter": int(maxiter * 3), "ftol": 1e-9, "disp": False})
-        if (not res.success) or (res.x is None):
-            msg = getattr(res, "message", "unknown")
-            raise RuntimeError(f"Weight solve failed: {msg}")
+def solve_ospm_theta_stellar(theta,obs,*,halo_type="nfw"):
+    rho_s,r_s,MBH=map(float,theta)
+    R=np.asarray(obs.R_star_m,float); v=np.asarray(obs.v_star_mps,float); ve=np.asarray(obs.verr_star_mps,float)
+    if R.size==0 or not np.all(np.isfinite(R)): raise ValueError("R invalid")
+    rv=np.asarray(obs.valid_vlos,bool)
+    if rv.size!=R.size: raise ValueError("rv mask mismatch")
+    Norbit=int(obs.Norbit); sini=float(obs.sini)
+    Nocc=int(getattr(obs,"Nocc",0)); lambda_occ=float(getattr(obs,"lambda_occ",1.0))
 
-    w = np.asarray(res.x, float)
-    w[w < 0] = 0.0
-    s = float(w.sum())
-    if (not np.isfinite(s)) or (s <= 0):
-        w[:] = 1.0 / Norbit
-    else:
-        w /= s
-    return w
+    A=build_A_matrix_stellar_julia(R_star_m=R,v_star_mps=v,verr_star_mps=ve,sini=sini,Norbit=Norbit,theta=[rho_s,r_s,MBH],halo_type=halo_type,return_occ=True)
+    A=np.asarray(A,float)
+    if A.ndim!=2 or A.shape[1]!=Norbit or A.shape[0]!=R.size+Nocc: raise ValueError("A malformed")
 
-def solve_ospm_theta_stellar(theta, obs, *, halo_type: str = "nfw"):
-    rho_s, r_s, MBH = map(float, theta)
+    w=solve_weights_stellar(A,verr_star_mps=ve,rv_mask=rv,Nstar=R.size,Nocc=Nocc,lambda_occ=lambda_occ,alpha=float(getattr(obs,"alpha_w",1e-2)),maxiter=int(getattr(obs,"w_maxiter",500)))
+    ll=stellar_log_likelihood(A,w,verr_star_mps=ve,rv_mask=rv,Nstar=R.size,Nocc=Nocc,lambda_occ=lambda_occ)
+    chi2_like=-2.0*ll
 
-    # --- all stars always (geometry + RV) ---
-    R_all  = np.asarray(obs.R_star_m, float)
-    v_all  = np.asarray(obs.v_star_mps, float)
-    ve_all = np.asarray(obs.verr_star_mps, float)
+    pen1,_,_,_=chi2_resolution_penalty(MBH_msun=MBH,R_star_m=R,v_star_mps=v,strength=float(getattr(obs,"PEN_SPHERE_STRENGTH",2.0)),power=float(getattr(obs,"PEN_SPHERE_POWER",2.0)))
+    pen2,_,_,_,_,_=mass_slope_penalty(theta=[rho_s,r_s,MBH],halo_type=halo_type,R_star_m=R,strength=float(getattr(obs,"PEN_SLOPE_STRENGTH",0.5)))
+    chi2=chi2_like+pen1+pen2
 
-    if not np.all(np.isfinite(R_all)):
-        raise ValueError("obs.R_star_m contains non-finite values")
-    if R_all.size == 0:
-        raise ValueError("obs.R_star_m is empty")
-
-    rv = np.asarray(getattr(obs, "valid_vlos", None), bool)
-    if rv is None or rv.size != R_all.size:
-        raise ValueError("obs.valid_vlos missing or length mismatch")
-
-    # Enforce finiteness only where RV is valid
-    if rv.any():
-        if not np.all(np.isfinite(v_all[rv])):
-            raise ValueError("v_star_mps contains non-finite values for valid_vlos stars")
-        if not np.all(np.isfinite(ve_all[rv])):
-            raise ValueError("verr_star_mps contains non-finite values for valid_vlos stars")
-
-    Norbit = int(obs.Norbit)
-    if Norbit < 1:
-        raise ValueError("obs.Norbit must be >= 1")
-
-    sini = float(obs.sini)
-    if not np.isfinite(sini):
-        raise ValueError("obs.sini is non-finite")
-
-    # Occupancy knobs
-    Nocc = int(getattr(obs, "Nocc", 0))
-    lambda_occ = float(getattr(obs, "lambda_occ", 1.0))
-
-    # Build A for ALL stars. Julia already zeros out NaN/invalid sigma rows.
-    # return_occ=True gives star rows + occupancy rows.
-    A = build_A_matrix_stellar_julia(
-        R_star_m=R_all, v_star_mps=v_all, verr_star_mps=ve_all,
-        sini=sini, Norbit=Norbit, theta=[rho_s, r_s, MBH],
-        halo_type=halo_type, return_occ=True
-    )
-    A = np.asarray(A, float)
-    if A.ndim != 2 or A.shape[1] != Norbit:
-        raise ValueError(f"Unexpected A shape: {A.shape}, expected (*,{Norbit})")
-
-    Nstar = int(R_all.size)
-    if A.shape[0] != Nstar + Nocc:
-        raise ValueError(f"A rows={A.shape[0]} do not match Nstar+Nocc={Nstar+Nocc}")
-
-    # Solve weights with RV subset + occupancy. Geometry-only stars still influence occupancy.
-    w = solve_weights_stellar(
-        A,
-        verr_star_mps=ve_all,
-        rv_mask=rv,
-        Nstar=Nstar,
-        Nocc=Nocc,
-        lambda_occ=lambda_occ,
-        alpha=float(getattr(obs, "alpha_w", 1e-2)),
-        maxiter=int(getattr(obs, "w_maxiter", 500))
-    )
-
-    ll = stellar_log_likelihood(
-        A, w,
-        verr_star_mps=ve_all,
-        rv_mask=rv,
-        Nstar=Nstar,
-        Nocc=Nocc,
-        lambda_occ=lambda_occ
-    )
-
-    chi2_like = -2.0 * ll
-    # For mixed capability, dof should use Nrv, not Nstar.
-    Nrv = int(rv.sum())
-    nu = max(Nrv - 3, 1)
-    chi2_red = float(chi2_like) / float(nu)
-
-    model = A @ w
-    return float(chi2_red), w, model
+    nu=max(int(rv.sum())-3,1)
+    return float(chi2/nu), w, A@w

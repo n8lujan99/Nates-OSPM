@@ -8,7 +8,9 @@ if [ -d "$ROOT/.venv" ]; then
     source "$ROOT/.venv/bin/activate"
 fi
 
+# Inject repo context
+export PYTHONPATH="$ROOT"
+
 cd "$ROOT"
 
 python -m OSPM.Plotting.plot_analysis1
-

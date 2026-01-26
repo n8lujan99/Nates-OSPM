@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -e
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+echo "[DATA] Repo root: $ROOT"
+
+if [[ ! -f which_galaxy ]]; then
+  echo "[ERROR] which_galaxy not found"
+  exit 1
+fi
+
+GALAXY="$(cat which_galaxy | tr -d '[:space:]')"
+export OSPM_GALAXY="$GALAXY"
+
+echo "[DATA] Galaxy: $OSPM_GALAXY"
+echo "[DATA] Running DATA_NEW_GAL"
+
+python -m Data.Data_Prep.DATA_NEW_GAL
+
+echo "[DATA] Done"

@@ -41,7 +41,8 @@ class OSPMObservablesStellar:
         self.Nocc = 6
         self.lambda_occ = 0.3
     @classmethod
-    def from_star_table(cls, csv_path, *, r_col="r_pc", v_col="vlos", verr_col="vlos_err", has_vlos_col="has_vlos", inclination_deg, Norbit):
+    def from_star_table(cls, csv_path, *, r_col="r_pc", v_col="vlos", 
+                        verr_col="vlos_err", has_vlos_col="has_vlos", inclination_deg, Norbit):
         import pandas as pd
         df = pd.read_csv(csv_path)
         missing = [c for c in (r_col, v_col, verr_col, has_vlos_col) if c not in df.columns]

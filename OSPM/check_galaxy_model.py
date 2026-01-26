@@ -1,54 +1,48 @@
 # check_galaxy_model.py
 #
 # Galaxy-level sanity check for OSPM.
+# Uses the ACTIVE galaxy only.
+#
 # Verifies:
 # - star.csv integrity
 # - observables construction
-# - Julia A-matrix build
 # - single-theta solver evaluation
-#
-# This is a REQUIRED preflight for every galaxy.
+
 import inspect
-import OSPM.Solvers.OSPM_Solver_Stellar as S
-
-print("[CHECK] solver file:", S.__file__)
-print("[CHECK] solve_ospm_theta_stellar starts at line:",
-      inspect.getsourcelines(S.solve_ospm_theta_stellar)[1])
-
-import sys
 import numpy as np
 import pandas as pd
 
-from OSPM.Gal_Registry import load_galaxy
+from OSPM.load_config import load_config, get_profile_root
 from OSPM.Observables.OSPM_Observables_Stellar import OSPMObservablesStellar
 from OSPM.Solvers.OSPM_Solver_Stellar import solve_ospm_theta_stellar
+import OSPM.Solvers.OSPM_Solver_Stellar as S
 
 
+def main():
 
-def main(galaxy):
+    cfg = load_config()
+    galaxy = cfg["GALAXY"]
+    profile_root = get_profile_root()
 
     print(f"[CHECK] Galaxy = {galaxy}")
+    print("[CHECK] solver file:", S.__file__)
+    print("[CHECK] solve_ospm_theta_stellar starts at line:",
+          inspect.getsourcelines(S.solve_ospm_theta_stellar)[1])
 
-    gal = load_galaxy(galaxy)
+    star_csv = profile_root / "default" / "star.csv"
 
-    if gal.get("error"):
-        raise RuntimeError(f"Failed to load galaxy: {gal['error']}")
-
-    star_df = gal["stars"]
-    cfg     = gal["config"]
-
-    if star_df is None:
+    if not star_csv.exists():
         raise RuntimeError("star.csv not found")
+
+    star_df = pd.read_csv(star_csv)
 
     print("[CHECK] star.csv loaded")
     print("  Nstar =", len(star_df))
     print("  columns =", list(star_df.columns))
 
-    if "r_pc" not in star_df.columns:
-        raise RuntimeError("Missing r_pc column")
-
-    if "has_vlos" not in star_df.columns:
-        raise RuntimeError("Missing has_vlos column")
+    for col in ("r_pc", "has_vlos"):
+        if col not in star_df.columns:
+            raise RuntimeError(f"Missing {col} column")
 
     n_has = int(star_df["has_vlos"].sum())
     n_fin = int(star_df["vlos"].notna().sum()) if "vlos" in star_df.columns else 0
@@ -60,10 +54,10 @@ def main(galaxy):
     # Build observables
     # --------------------------------------------------
 
-    Norbit = 8
+    Norbit = min(8, cfg["NORBIT"])
 
     obs = OSPMObservablesStellar.from_star_table(
-        gal["profile_root"] / "default" / "star.csv",
+        star_csv,
         inclination_deg=cfg["INCLINATION_DEG"],
         Norbit=Norbit,
     )
@@ -108,9 +102,4 @@ def main(galaxy):
 
 
 if __name__ == "__main__":
-
-    if len(sys.argv) != 2:
-        print("Usage: python check_galaxy_model.py <GalaxyName>")
-        sys.exit(1)
-
-    main(sys.argv[1])
+    main()

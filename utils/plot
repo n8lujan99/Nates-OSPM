@@ -3,15 +3,14 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Activate venv
+# Activate venv if present
 if [ -d "$ROOT/.venv" ]; then
     source "$ROOT/.venv/bin/activate"
 fi
 
-# THIS is the missing line
+# Inject repo context
 export PYTHONPATH="$ROOT"
 
 cd "$ROOT"
 
 python -m OSPM.Plotting.plot_analysis1
-

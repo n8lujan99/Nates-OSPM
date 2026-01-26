@@ -25,11 +25,11 @@ CONFIG = {
 
     # Parameter space
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA":   [1.0, 500.0, 0.0],
+    "INITIAL_THETA":   [0.1, 30.0, 0.0],
     "THETA_BOUNDS": [
-        (1e-1, 1e6),
-        (20.0, 1e5),
-        (1.0, 2e6),
+        (1e-3, 10.0),
+        (1.0, 300),
+        (0, 1e6),
     ],
 
     # Data-generation metadata
@@ -39,11 +39,11 @@ CONFIG = {
 
     # Column authority
     "STAR_R_COL":    "r_pc",
-    "STAR_V_COL":    "radial_velocity",
-    "STAR_VERR_COL": "radial_velocity_error",
-    "RA_COL":        "RA_deg",
-    "DEC_COL":       "Dec_deg",
-    "VLOS_COL":      "radial_velocity",
+    "STAR_V_COL":    "vlos",
+    "STAR_VERR_COL": "vlos_err",
+    "RA_COL":        "ra",
+    "DEC_COL":       "dec",
+    "VLOS_COL":      "vlos",
 
     # Paths
     **build_data_paths(PROFILE_ROOT),

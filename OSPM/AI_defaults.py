@@ -5,7 +5,7 @@
 from pathlib import Path
 
 
-AI_DEFAULTS = {
+CONFIG = {
     # Mode
     "MODE":      "stellar",
     "HALO_TYPE": "nfw",

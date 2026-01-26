@@ -1,25 +1,56 @@
-from .AI_defaults import AI_DEFAULTS
-from Data.Gal_Profiles.Segue1 import Segue1_OSPM_Config
-from Data.Gal_Profiles.Draco  import Draco_OSPM_Config
-from Data.Gal_Profiles.Carina import Carina_OSPM_Config
+from pathlib import Path
+from importlib import import_module
+from .AI_defaults import CONFIG as AI_DEFAULTS
 
-_GALAXY_MAP = {
-    "Segue1": Segue1_OSPM_Config,
-    "Draco":  Draco_OSPM_Config,
-    "Carina": Carina_OSPM_Config,
-}
+# --------------------------------------------------
+# Galaxy authority (single source of truth)
+# --------------------------------------------------
 
-def load_config(galaxy: str):
-    if galaxy not in _GALAXY_MAP:
-        raise KeyError(f"Unknown galaxy: {galaxy}")
+OSPM_ROOT = Path(__file__).resolve().parents[1]
+WHICH_FILE = OSPM_ROOT / "which_galaxy"
 
-    cfg = {**AI_DEFAULTS, **_GALAXY_MAP[galaxy].CONFIG}
+def _get_galaxy_name():
+    if not WHICH_FILE.exists():
+        raise RuntimeError("which_galaxy missing at repo root")
+    name = WHICH_FILE.read_text().strip()
+    if not name:
+        raise RuntimeError("which_galaxy is empty")
+    return name
+
+def get_profile_root():
+    gal = _get_galaxy_name()
+    return OSPM_ROOT / "Data" / "Gal_Profiles" / gal
+
+# --------------------------------------------------
+# Config loader
+# --------------------------------------------------
+
+def load_config():
+    galaxy = _get_galaxy_name()
+
+    try:
+        mod = import_module(
+            f"Data.Gal_Profiles.{galaxy}.{galaxy}_OSPM_Config"
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to load config for {galaxy}") from e
+
+    cfg = {**AI_DEFAULTS, **mod.CONFIG}
+
+    # Declare identity explicitly
+    cfg["GALAXY"] = galaxy
 
     required = [
-        "GALAXY","MODE","HALO_TYPE",
-        "MIN_DISTANCE","MAX_DISTANCE",
-        "NORBIT","BATCH_SIZE","MAX_RUNS",
+        "GALAXY",
+        "MODE",
+        "HALO_TYPE",
+        "MIN_DISTANCE",
+        "MAX_DISTANCE",
+        "NORBIT",
+        "BATCH_SIZE",
+        "MAX_RUNS",
     ]
+
     missing = [k for k in required if k not in cfg]
     if missing:
         raise KeyError(f"CONFIG missing required keys: {missing}")

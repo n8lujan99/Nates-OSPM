@@ -5,20 +5,6 @@
 import os
 import datetime
 import pandas as pd
-from ..Gal_Registry import load_config
-
-def get_active_galaxy():
-    gal = os.environ.get("OSPM_GALAXY")
-    if not gal:
-        raise RuntimeError(
-            "OSPM_GALAXY not set. Example:\n"
-            "export OSPM_GALAXY=Segue1"
-        )
-    return gal
-
-def load_active_config():
-    galaxy = get_active_galaxy()
-    return load_config(galaxy)
 
 def ensure_deck(ctrl):
     path = ctrl["CSV_PATH"]
@@ -26,13 +12,8 @@ def ensure_deck(ctrl):
     if os.path.exists(path):
         return
     row = dict(zip(ctrl["PARAMETER_NAMES"], ctrl["INITIAL_THETA"]))
-    row.update({
-        "chi2": float("inf"),
-        "reward": None,
-        "status": ctrl["FILL_DEFAULT_STATUS"],
-    })
+    row.update({"chi2": float("inf"), "reward": None, "status": ctrl["FILL_DEFAULT_STATUS"]})
     pd.DataFrame([row]).to_csv(path, index=False)
-
 def build_runtime(ctrl):
     ts  = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     pid = os.getpid()
