@@ -3,7 +3,7 @@ set -e
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$ROOT_DIR/.venv"
-REQ_FILE="$ROOT_DIR/_Setup/requirements.txt"
+REQ_FILE="$ROOT_DIR/utils/_Setup/requirements.txt"
 
 echo "[setup] OSPM root: $ROOT_DIR"
 
