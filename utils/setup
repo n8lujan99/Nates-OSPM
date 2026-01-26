@@ -1,24 +1,38 @@
 #!/usr/bin/env bash
 set -e
 
+# -------------------------------------------------
+# Paths
+# -------------------------------------------------
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$ROOT_DIR/.venv"
 REQ_FILE="$ROOT_DIR/utils/_Setup/requirements.txt"
 
 echo "[setup] OSPM root: $ROOT_DIR"
 
-# ----------------------------------------
+# -------------------------------------------------
+# Require conda (cluster-safe)
+# -------------------------------------------------
+
+if [[ -z "${CONDA_DEFAULT_ENV:-}" ]]; then
+    echo "[setup] ERROR: Conda environment not active"
+    echo "[setup] Activate with: conda activate ospm"
+    exit 2
+fi
+
+# -------------------------------------------------
 # Python check
-# ----------------------------------------
+# -------------------------------------------------
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "[setup] ERROR: python3 not found"
     exit 1
 fi
 
-# ----------------------------------------
+# -------------------------------------------------
 # Create venv if missing
-# ----------------------------------------
+# -------------------------------------------------
 
 if [ ! -d "$VENV_DIR" ]; then
     echo "[setup] No venv found — creating"
@@ -27,33 +41,34 @@ else
     echo "[setup] venv exists"
 fi
 
-# ----------------------------------------
+# -------------------------------------------------
 # Activate venv
-# ----------------------------------------
+# -------------------------------------------------
 
 source "$VENV_DIR/bin/activate"
 
-# ----------------------------------------
-# Ensure pip version
-# ----------------------------------------
+# -------------------------------------------------
+# Upgrade pip (never pin on HPC)
+# -------------------------------------------------
 
-PIP_VER="$(pip --version | awk '{print $2}')"
+echo "[setup] Upgrading pip"
+pip install --upgrade pip
 
-if [ "$PIP_VER" != "24.0" ]; then
-    echo "[setup] pip $PIP_VER found — upgrading to 24.0"
-    pip install --upgrade pip==24.0
-else
-    echo "[setup] pip version OK (24.0)"
+# -------------------------------------------------
+# Install requirements if needed
+# -------------------------------------------------
+
+if [ ! -f "$REQ_FILE" ]; then
+    echo "[setup] ERROR: requirements file not found:"
+    echo "        $REQ_FILE"
+    exit 1
 fi
 
-# ----------------------------------------
-# Verify requirements
-# ----------------------------------------
-
-echo "[setup] Verifying Python dependencies"
+echo "[setup] Checking Python dependencies"
 
 python - <<EOF
 import sys
+import subprocess
 
 required = [
     "numpy",
@@ -72,16 +87,35 @@ for pkg in required:
         missing.append(pkg)
 
 if missing:
-    print("[setup] Missing packages:", missing)
-    sys.exit(1)
-
-print("[setup] All required packages present")
+    print("[setup] Missing packages detected:", missing)
+    print("[setup] Installing from requirements.txt")
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "-r", "$REQ_FILE"]
+    )
+else:
+    print("[setup] All required packages already installed")
 EOF
 
-# ----------------------------------------
-# Optional sanity check
-# ----------------------------------------
+# -------------------------------------------------
+# Final verification
+# -------------------------------------------------
 
-python "$ROOT_DIR/_Setup/__init__.py"
+echo "[setup] Final verification"
 
-echo "[setup] Environment ready"
+python - <<EOF
+import sys
+
+required = [
+    "numpy",
+    "scipy",
+    "pandas",
+    "matplotlib",
+    "astropy",
+    "torch",
+]
+
+for pkg in required:
+    __import__(pkg)
+
+print("[setup] Environment ready")
+EOF

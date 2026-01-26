@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -e
+
+# Ensure we're inside a git repo and move to root
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    echo "[pull] Not inside a git repository."
+    exit 1
+}
+cd "$REPO_ROOT"
+
+echo "[pull] Repo root: $REPO_ROOT"
+echo "[pull] Branch: $(git branch --show-current)"
+echo
+
+# Show current status
+echo "[pull] Current status:"
+git status --short
+echo
+
+# Refuse to pull with local changes
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "[pull] ERROR: Uncommitted changes detected."
+    echo "[pull] Commit or stash before pulling."
+    exit 1
+fi
+
+# Optional SSH sanity check (non-fatal)
+echo "[pull] Checking SSH access to GitHub..."
+ssh -T git@github.com || true
+echo
+
+# Pull current branch
+echo "[pull] Pulling from origin..."
+git pull --ff-only origin HEAD
+
+echo "[pull] Done."
