@@ -1,4 +1,4 @@
-# batch_run
+#!/bin/bash
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
@@ -11,22 +11,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GAL_DIR="$REPO_ROOT/Data/Gal_Profiles/$GALAXY"
 
 if [[ ! -d "$GAL_DIR" ]]; then
-    echo "[FATAL] Galaxy '$GALAXY' not found in Data/Gal_Profiles"
+    echo "[FATAL] Galaxy '$GALAXY' not found"
     exit 1
 fi
 
-echo "[INFO] Submitting batch run for galaxy: $GALAXY"
+echo "[INFO] Preparing SLURM run for galaxy: $GALAXY"
 
 echo "$GALAXY" > "$REPO_ROOT/which_galaxy"
 
 mkdir -p "$REPO_ROOT/logs"
 
-# Optional provenance
-{
-    echo "galaxy=$GALAXY"
-    echo "submitted=$(date -u)"
-    echo "host=$(hostname)"
-    git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true
-} > "$REPO_ROOT/run_context.txt"
-
-sbatch "$REPO_ROOT/data/slurm/ospm.slurm"
+sbatch "$REPO_ROOT/data/slurm"
