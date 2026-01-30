@@ -15,11 +15,11 @@ echo "[setup] OSPM root: $ROOT_DIR"
 # Require conda (cluster-safe)
 # -------------------------------------------------
 
-if [[ -z "${CONDA_DEFAULT_ENV:-}" ]]; then
-    echo "[setup] ERROR: Conda environment not active"
-    echo "[setup] Activate with: conda activate ospm"
-    exit 2
-fi
+#if [[ -z "${CONDA_DEFAULT_ENV:-}" ]]; then
+#    echo "[setup] ERROR: Conda environment not active"
+#    echo "[setup] Activate with: conda activate ospm"
+#    exit 2
+#fi
 
 # -------------------------------------------------
 # Python check
