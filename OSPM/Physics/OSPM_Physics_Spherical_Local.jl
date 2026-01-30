@@ -1,7 +1,3 @@
-This one runs locally but not on tacc 
-
-update the code to be safe on hpcs as well module OSPMPhysicsSpherical
-
 using LinearAlgebra, StaticArrays, Statistics, Random, Base.Threads
 
 export build_R_halo_physical, rho_interp, halo_from_theta, tables_spherical,
