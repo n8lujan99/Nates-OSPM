@@ -25,7 +25,7 @@ CONFIG = {
 
     # Parameter space
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA":   [0.1, 30.0, 0.0],
+    "INITIAL_THETA":   [0.1, 8.0, 50000.0],
     "THETA_BOUNDS": [
         (1e-3, 10.0),
         (1.0, 300),

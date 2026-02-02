@@ -44,16 +44,16 @@ CONFIG = {
     "FILL_DEFAULT_STATUS": "todo",
 
     # Sampling / termination
-    "BATCH_SIZE":            250,
-    "MIN_BATCH_SIZE":        8,
-    "MAX_BATCH_SIZE":        256,
+    "BATCH_SIZE":            2,
+    "MIN_BATCH_SIZE":        1,
+    "MAX_BATCH_SIZE":        5,
     "MAX_RUNS":              100000,
     "STOP_NO_IMPROVEMENT":   1000,
     "IMPROVEMENT_EPSILON":   1e-6,
-    "LOG_INTERVAL":          500,
+    "LOG_INTERVAL":          1,
 
     # AI control
-    "AI_START_AFTER":       250,
+    "AI_START_AFTER":       1,
     "MIN_TRAIN_POINTS":     800,
     "TRAIN_WINDOW":         2000,
     "AI_NOISE_INIT":        0.30,

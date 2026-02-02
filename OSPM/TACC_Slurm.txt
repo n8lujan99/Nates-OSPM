@@ -1,0 +1,15 @@
+#!/bin/bash
+
+#SBATCH -A AST24017 #XSEDE allocation
+#SBATCH -n 1024 # number of mpi tasks requested
+#SBATCH -N 8 # total number of nodes requested
+#SBATCH -J SANE_a0.9 # job name
+#SBATCH -p normal  # partition to use (normal, large, development)
+#SBATCH -t 48:00:00 # run time
+#SBATCH -e ./err
+#SBATCH --mail-user=joaquin.duran@utsa.edu
+#SBATCH --mail-type=begin
+#SBATCH --mail-type=end
+
+./mpar.sh
+time ibrun tacc_affinity ./ko > ko_out
