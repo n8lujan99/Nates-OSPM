@@ -2,7 +2,7 @@
 #SBATCH --job-name=ospm
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
-#SBATCH --time=12:00:00
+#SBATCH --time=01:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -10,7 +10,9 @@
 
 set -euo pipefail
 
-REPO_ROOT="$HOME/Nates-OSPM"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+REPO_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
+
 WHICH_GAL_FILE="$REPO_ROOT/which_galaxy"
 
 if [[ ! -f "$WHICH_GAL_FILE" ]]; then
@@ -18,15 +20,21 @@ if [[ ! -f "$WHICH_GAL_FILE" ]]; then
     exit 1
 fi
 
-GALAXY=$(tr -d '[:space:]' < "$WHICH_GAL_FILE")
+GALAXY="$(tr -d '[:space:]' < "$WHICH_GAL_FILE")"
 
 if [[ -z "$GALAXY" ]]; then
     echo "[FATAL] which_galaxy is empty"
     exit 1
 fi
 
-echo "[INFO] SLURM job running galaxy: $GALAXY"
+echo "[INFO] Galaxy: $GALAXY"
+echo "[INFO] Repo root: $REPO_ROOT"
+echo "[INFO] CPUs: ${SLURM_CPUS_PER_TASK}"
 
 cd "$REPO_ROOT"
+
+source utils/setup
+source .venv/bin/activate
+export JULIA_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 
 bash utils/start

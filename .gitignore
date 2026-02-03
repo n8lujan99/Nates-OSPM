@@ -17,3 +17,20 @@ Data/Gal_Profiles/**/logs/
 
 # OS files
 .DS_Store
+
+# ===============================
+# HPC / Julia runtime artifacts
+# ===============================
+.julia_dist/
+.julia/
+.julia_logs/
+
+# ===============================
+# Slurm output (repo root)
+# ===============================
+logs/
+*.out
+*.err
+slurm-*.out
+
+
