@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WHICH_FILE="$ROOT/which_galaxy"
@@ -9,7 +9,7 @@ if [ ! -f "$WHICH_FILE" ]; then
     exit 1
 fi
 
-GALAXY="$(cat "$WHICH_FILE" | tr -d '[:space:]')"
+GALAXY="$(tr -d '[:space:]' < "$WHICH_FILE")"
 
 if [ -z "$GALAXY" ]; then
     echo "[ERROR] which_galaxy is empty"
@@ -18,11 +18,13 @@ fi
 
 echo "[START] Repo root: $ROOT"
 echo "[START] Galaxy: $GALAXY"
+echo "[START] Julia threads: ${JULIA_NUM_THREADS:-unset}"
 
-source "$ROOT/.venv/bin/activate"
+# Environment should already be active via Slurm or shell
+# Do NOT override JULIA_NUM_THREADS here
 
 export PYJULIA_USE_PYTHONCALL=1
 export OSPM_USE_JULIA=1
 export PYTHONPATH="$ROOT"
-export JULIA_NUM_THREADS=1
+
 python -m OSPM.Controllers.OSPM_RUN
