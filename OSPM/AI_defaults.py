@@ -18,12 +18,12 @@ CONFIG = {
     "BINNING": {
         "MIN_BINS":         5,
         "N_TARGET_CIRC":    5,
-        "MIN_PER_BIN_CIRC": 6,
+        "MIN_PER_BIN_CIRC": 8,
     },
 
     # Physical domain
     "MIN_DISTANCE":             1e-6,
-    "MAX_DISTANCE":             5e3,
+    "MAX_DISTANCE":             2000,
     "R_GRID_POINTS":            256,
     "POTENTIAL_EXTENT":         10.0,
     "BH_MIN_RADIUS_MULTIPLIER": 2.0,
@@ -45,16 +45,16 @@ CONFIG = {
 
     # Sampling / termination
     "BATCH_SIZE":            2,
-    "MIN_BATCH_SIZE":        1,
-    "MAX_BATCH_SIZE":        5,
-    "MAX_RUNS":              100000,
-    "STOP_NO_IMPROVEMENT":   1000,
+    "MIN_BATCH_SIZE":        4,
+    "MAX_BATCH_SIZE":        8,
+    "MAX_RUNS":              500,
+    "STOP_NO_IMPROVEMENT":   500,
     "IMPROVEMENT_EPSILON":   1e-6,
     "LOG_INTERVAL":          1,
 
     # AI control
     "AI_START_AFTER":       1,
-    "MIN_TRAIN_POINTS":     800,
+    "MIN_TRAIN_POINTS":     1,
     "TRAIN_WINDOW":         2000,
     "AI_NOISE_INIT":        0.30,
     "AI_NOISE_MIN":         0.02,

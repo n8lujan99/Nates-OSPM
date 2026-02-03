@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IN="data.csv"
+OUT="data_pc.csv"
+
+DIST_PC=23000.0
+ARCSEC_TO_RAD=$(python - <<EOF
+import math
+print(math.pi / (180.0 * 3600.0))
+EOF
+)
+
+awk -F',' -v OFS=',' \
+    -v D="$DIST_PC" \
+    -v C="$ARCSEC_TO_RAD" '
+NR==1 {
+    for (i=1;i<=NF;i++) {
+        if ($i=="x_pc") x=i
+        if ($i=="y_pc") y=i
+        if ($i=="r_pc") r=i
+    }
+    if (!x || !y || !r) {
+        print "ERROR: expected columns x_pc,y_pc,r_pc" > "/dev/stderr"
+        exit 1
+    }
+    print
+    next
+}
+{
+    xr = $x
+    yr = $y
+    rp = sqrt(xr*xr + yr*yr) * D * C
+    $r = sprintf("%.6f", rp)
+    print
+}
+' "$IN" > "$OUT"
+
+echo "[OK] wrote $OUT with r_pc converted from arcsec → pc"

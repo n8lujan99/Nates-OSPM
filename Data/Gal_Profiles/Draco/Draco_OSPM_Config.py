@@ -10,8 +10,9 @@ Galaxy = "Draco"
 
 
 # Paths need to be specified in Data_Paths.py sticking to the following convention:
-OSPM_ROOT    = Path(__file__).resolve().parent
-PROFILE_ROOT = OSPM_ROOT / "data" / "profiles" / Galaxy
+PROFILE_ROOT = Path(__file__).resolve().parent
+if not PROFILE_ROOT.exists():
+    raise FileNotFoundError(f"PROFILE_ROOT does not exist: {PROFILE_ROOT}")
 
 
 CONFIG = {
