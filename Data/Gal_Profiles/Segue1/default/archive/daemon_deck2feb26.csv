@@ -1,3 +1,4 @@
+The file was generated in local using only 50 orbits so the pass is not robust but shows that the script runs this was done on 04Feb26 before running on TACC
 rho_s,r_s,MBH,chi2,reward,status,proposal_id
 0.1,2.0,50000.0,,,todo,
 5.328797414872801,160.28756660703593,509553.035526467,765.8794984996439,-765.8794984996439,pass,1.0
