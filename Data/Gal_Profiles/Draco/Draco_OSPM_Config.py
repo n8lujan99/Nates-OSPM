@@ -64,7 +64,7 @@ CONFIG = {
     # =========================================================
     # OSPM numerical setup
     # =========================================================
-    "NORBIT":              1000, # of orbits to sample per evaluation (Karl's default: 10,000) 10,000 is a lot and bogging down the system. 
+    "NORBIT":              500, # of orbits to sample per evaluation (Karl's default: 10,000) 10,000 is a lot and bogging down the system. 
     "BINNING": {
         "MIN_BINS":            5,
         "N_TARGET_CIRC":       5,
@@ -75,11 +75,11 @@ CONFIG = {
     # Parameter space
     # =========================================================
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA":   [1.0, 500.0, 0.0],   
+    "INITIAL_THETA":   [1.0, 500.0, 2000000.0],   
     "THETA_BOUNDS": [
-        (1e-1, 1e6),     # rho_s
-        (200, 1e5),      # r_s
-        (1.0, 2e6),      # MBH
+        (1e-3, 1e6),     # rho_s
+        (0.1, 1e5),      # r_s
+        (0, 1e7),      # MBH
     ],
 
     # Penalties
@@ -106,17 +106,17 @@ CONFIG = {
     # =========================================================
     # Sampling & control
     # =========================================================
-    "BATCH_SIZE":          250,
-    "MIN_BATCH_SIZE":      8,
+    "BATCH_SIZE":          16,
+    "MIN_BATCH_SIZE":      4,
     "MAX_BATCH_SIZE":      256,
-    "_PRINT_EVERY":        200,
+    "_PRINT_EVERY":        5,
     "_print_counter":      0,
 
     # =========================================================
     # AI / learning
     # =========================================================
-    "AI_START_AFTER":        250,
-    "MIN_TRAIN_POINTS":      800,
+    "AI_START_AFTER":        15,
+    "MIN_TRAIN_POINTS":      50,
     "TRAIN_WINDOW":          2000,
     "AI_NOISE_INIT":         0.30,
     "AI_NOISE_MIN":          0.02,
@@ -133,10 +133,10 @@ CONFIG = {
     # =========================================================
     # Termination
     # =========================================================
-    "MAX_RUNS":              100000,
-    "STOP_NO_IMPROVEMENT":   1000,
+    "MAX_RUNS":              500,
+    "STOP_NO_IMPROVEMENT":   100,
     "IMPROVEMENT_EPSILON":   1e-6,
-    "LOG_INTERVAL":          500,
+    "LOG_INTERVAL":          50,
 
     # =========================================================
     # Constants

@@ -61,7 +61,7 @@ CONFIG = {
     # =========================================================
     # OSPM numerical setup
     # =========================================================
-    "NORBIT":              1000,   # keep parity with Draco unless intentionally reduced
+    "NORBIT":              50,   # keep parity with Draco unless intentionally reduced
     "BINNING": {
         "MIN_BINS":            5,
         "N_TARGET_CIRC":       5,
@@ -72,10 +72,10 @@ CONFIG = {
     # Parameter space
     # =========================================================
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA":   [0.1, 8.0, 5.0e4],
+    "INITIAL_THETA":   [0.1, 2.0, 50000],
     "THETA_BOUNDS": [
         (1e-3, 10.0),     # rho_s
-        (1.0, 300.0),    # r_s
+        (0.1, 300.0),    # r_s
         (0.0, 1e6),      # MBH
     ],
 
@@ -107,11 +107,11 @@ CONFIG = {
     # =========================================================
     # Sampling & control
     # =========================================================
-    "BATCH_SIZE":          250,
+    "BATCH_SIZE":          4,
     "MIN_BATCH_SIZE":      8,
     "MAX_BATCH_SIZE":      256,
-    "_PRINT_EVERY":        200,
-    "_print_counter":      0,
+    "_PRINT_EVERY":        10,
+    "_print_counter":      4,
 
     # =========================================================
     # AI / learning
