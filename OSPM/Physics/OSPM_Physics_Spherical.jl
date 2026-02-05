@@ -50,24 +50,43 @@ end
 logspace10(a,b,n)=n==1 ? [10.0^a] : (da=(b-a)/(n-1); [10.0^(a+(i-1)*da) for i in 1:n])
 build_R_halo_physical(n; rmin=1e-3, rmax=300.0)=logspace10(log10(rmin), log10(rmax), n)
 
+###########################################
+# Dark matter halo part that needs to be extended later to test multiple halo types
+#########################
 function rho_interp(rv, halo)
-    r=abs(rv[1]); rhos=halo[:rho_s]; rs=halo[:r_s]; x=r/max(rs,1e-30)
-    halo[:type]===:nfw   && return rhos/(x*(1+x)^2 + 1e-30)
-    halo[:type]===:cored && return rhos/((1+x)*(1+x^2) + 1e-30)
-    error("Unknown halo type")
+    r    = abs(rv[1])
+    rhos = halo[:rho_s]
+    rs   = halo[:r_s]
+    x    = r / max(rs, 1e-30)
+    halo[:type] === :nfw && 
+        return rhos / (x * (1 + x)^2 + 1e-30)
+    halo[:type] === :cored && 
+        return rhos / ((1 + x) * (1 + x^2) + 1e-30)
+    halo[:type] === :einasto && begin
+        α = halo[:alpha]          # curvature parameter
+        return rhos * exp(-2/α * (x^α - 1))
+    end
+    error("Unknown halo type: $(halo[:type])")
 end
 
-function halo_from_theta(rho_s, r_s, MBH; halo_type="nfw")
-    ht=Symbol(lowercase(String(halo_type)))
-    Dict(
-        :rho_s => f64(rho_s)*Msun/pc^3,
-        :r_s   => f64(r_s)*pc,
-        :rs    => f64(r_s)*pc,
-        :MBH   => f64(MBH)*Msun,
+
+function halo_from_theta(rho_s, r_s, MBH; halo_type="nfw", alpha=nothing)
+    ht = Symbol(lowercase(String(halo_type)))
+    h = Dict(
+        :rho_s => f64(rho_s) * Msun / pc^3,
+        :r_s   => f64(r_s)   * pc,
+        :rs    => f64(r_s)   * pc,
+        :MBH   => f64(MBH)   * Msun,
         :type  => ht,
-        :rmin  => 1e-6*f64(r_s)*pc
+        :rmin  => 1e-6 * f64(r_s) * pc
     )
+    # Optional shape parameter, only used for alt halo types like Einasto. Default value is 0.18 if not provided.
+    if ht === :einasto
+        h[:alpha] = isnothing(alpha) ? 0.18 : f64(alpha)
+    end
+    return h
 end
+
 
 function tables_spherical(R, nlegup, halo, rhofn)
     halo=normalize_halo(halo); n=length(R)
