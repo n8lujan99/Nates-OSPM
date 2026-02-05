@@ -25,4 +25,6 @@ fi
 mkdir -p "$REPO_ROOT/logs"
 
 echo "[INFO] Submitting job for galaxy: $GALAXY"
-sbatch "$SLURM_SCRIPT"
+echo "[INFO] Repo root: $REPO_ROOT"
+
+sbatch --export=ALL,OSPM_REPO_ROOT="$REPO_ROOT" "$SLURM_SCRIPT"
