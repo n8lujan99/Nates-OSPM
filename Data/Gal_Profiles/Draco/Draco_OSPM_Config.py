@@ -64,7 +64,7 @@ CONFIG = {
     # =========================================================
     # OSPM numerical setup
     # =========================================================
-    "NORBIT":              500, # of orbits to sample per evaluation (Karl's default: 10,000) 10,000 is a lot and bogging down the system. 
+    "NORBIT":              2000, # of orbits to sample per evaluation (Karl's default: 10,000) 10,000 is a lot and bogging down the system. 
     "BINNING": {
         "MIN_BINS":            5,
         "N_TARGET_CIRC":       5,
@@ -77,9 +77,9 @@ CONFIG = {
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
     "INITIAL_THETA":   [1.0, 500.0, 2000000.0],   
     "THETA_BOUNDS": [
-        (1e-3, 1e6),     # rho_s
-        (0.1, 1e5),      # r_s
-        (0, 1e7),      # MBH
+        (1e-6, 100.0),     # rho_s
+        (50.0, 2e4),      # r_s
+        (0.0, 1e7),      # MBH
     ],
 
     # Penalties
@@ -106,8 +106,8 @@ CONFIG = {
     # =========================================================
     # Sampling & control
     # =========================================================
-    "BATCH_SIZE":          16,
-    "MIN_BATCH_SIZE":      4,
+    "BATCH_SIZE":          32,
+    "MIN_BATCH_SIZE":      8,
     "MAX_BATCH_SIZE":      256,
     "_PRINT_EVERY":        5,
     "_print_counter":      0,
@@ -115,28 +115,28 @@ CONFIG = {
     # =========================================================
     # AI / learning
     # =========================================================
-    "AI_START_AFTER":        15,
-    "MIN_TRAIN_POINTS":      50,
-    "TRAIN_WINDOW":          2000,
+    "AI_START_AFTER":        200,
+    "MIN_TRAIN_POINTS":      200,
+    "TRAIN_WINDOW":          3000,
     "AI_NOISE_INIT":         0.30,
     "AI_NOISE_MIN":          0.02,
-    "AI_NOISE_TAU":          5000,
-    "AI_MIN_DISTINCT_PASS":  800,
+    "AI_NOISE_TAU":          8000,
+    "AI_MIN_DISTINCT_PASS":  500,
     "RESET_INTERVAL":        10000,
     "AI_DEBUG_EVERY":        200,
     "AI_SNAPSHOT_EVERY":     2000,
-    "FLAT_WINDOW":           200,
+    "FLAT_WINDOW":           300,
     "FLAT_THRESHOLD":        1e-6,
-    "FLAT_PATIENCE":         3,
+    "FLAT_PATIENCE":         5,
     "AI_RESET_ON_FLAT":      False,
 
     # =========================================================
     # Termination
     # =========================================================
-    "MAX_RUNS":              500,
-    "STOP_NO_IMPROVEMENT":   100,
+    "MAX_RUNS":              10000,
+    "STOP_NO_IMPROVEMENT":   500,
     "IMPROVEMENT_EPSILON":   1e-6,
-    "LOG_INTERVAL":          50,
+    "LOG_INTERVAL":          10, # Make larger on cluster
 
     # =========================================================
     # Constants

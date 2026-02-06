@@ -13,4 +13,4 @@ export PYTHONPATH="$ROOT"
 
 cd "$ROOT"
 
-python -m OSPM.Plotting.plot_analysis1
+python -m OSPM.Plotting.plot_analysis

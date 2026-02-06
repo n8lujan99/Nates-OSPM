@@ -20,14 +20,13 @@ except Exception:
 # ============================================================
 # Small utilities
 # ============================================================
-
+# Lightweight helpers for bounded sampling and distance checks.
+# These control exploration geometry only and encode no physics.
 def clamp(x, lo, hi): return max(lo, min(hi, x))
 def random_theta(bounds): return [np.random.uniform(lo, hi) for lo, hi in bounds]
-
 def min_dist(theta, arr):
     if len(arr)==0: return np.inf
     return np.linalg.norm(np.asarray(arr)-np.asarray(theta), axis=1).min()
-
 class IdentityScaler:
     def fit(self, X): return self
     def transform(self, X): return X
@@ -35,36 +34,32 @@ class IdentityScaler:
 # ============================================================
 # Models
 # ============================================================
-
+# Simple neural helpers used to bias exploration toward successful
+# regions of parameter space. They never see the physics engine
+# and do not perform optimization.
 class Model(nn.Module):
     def __init__(self, dim, width=64):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim,width), nn.ReLU(),
-            nn.Linear(width,width), nn.ReLU(),
-            nn.Linear(width,1)
-        )
+        self.net = nn.Sequential(nn.Linear(dim,width), nn.ReLU(),
+            nn.Linear(width,width), nn.ReLU(), nn.Linear(width,1))
     def forward(self, x): return self.net(x)
-
 class Agent(nn.Module):
     def __init__(self, dim, hidden=128):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim,hidden), nn.ReLU(),
-            nn.Linear(hidden,hidden), nn.ReLU(),
-            nn.Linear(hidden,dim), nn.Tanh()
-        )
+        self.net = nn.Sequential( nn.Linear(dim,hidden), nn.ReLU(),
+            nn.Linear(hidden,hidden), nn.ReLU(), nn.Linear(hidden,dim), nn.Tanh())
     def forward(self, x): return self.net(x)
-
     @torch.no_grad()
     def act(self, x, noise):
         a = self.forward(x) + noise*torch.randn_like(x)
         return torch.clamp(a, -1.0, 1.0)
-
+    
 # ============================================================
 # Deck
 # ============================================================
-
+# Persistent record of all attempted configurations.
+# Stores both successful and failed runs so forbidden regions
+# are learned and not re-sampled.
 class Deck:
     def __init__(self, config):
         self.config = config
@@ -74,7 +69,6 @@ class Deck:
         self.flush  = int(config.get("CSV_FLUSH_INTERVAL",50))
         self._dirty = 0
         self._load()
-
     def _load(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         if os.path.exists(self.path):
@@ -86,28 +80,22 @@ class Deck:
             row["status"]="todo"
             df = pd.DataFrame([row])
             df.to_csv(self.path,index=False)
-
         missing=[c for c in self.cols if c not in df.columns]
         if missing:
             raise KeyError(f"Deck missing required columns: {missing}")
-
         self.df = df[self.cols]
-
     def save(self):
         self.df.to_csv(self.path,index=False)
-
     def is_forbidden(self, theta, ndp=12):
         A = np.round(self.df[self.params].values, ndp)
         t = np.round(theta, ndp)
         m = (A==t).all(axis=1)
         return m.any() and (self.df.loc[m,"status"]=="forbidden").any()
-
     def nearest_distance(self, theta, tol):
         A=self.df[self.params].values.astype(float)
         m=np.all(np.abs(A-theta)<tol, axis=1)
         if not m.any(): return np.inf
         return np.linalg.norm(A[m]-theta,axis=1).min()
-
     def add(self, theta, chi2, reward, pid, status):
         row={k:theta[i] for i,k in enumerate(self.params)}
         row |= dict(chi2=chi2,reward=reward,status=status,proposal_id=pid)
@@ -119,6 +107,9 @@ class Deck:
 # ============================================================
 # Physics wrapper
 # ============================================================
+# Strict interface to the external dynamics engine.
+# Only numerically and dynamically self-consistent runs are
+# accepted; all failures are hard rejections.
 
 class Corpo:
     def __init__(self, engine): self.engine=engine
@@ -134,41 +125,39 @@ class Corpo:
 # ============================================================
 # AI helpers
 # ============================================================
+# Controls when learning is enabled and detects when exploration
+# has saturated in chi^2 space.
 
 class Fixer:
     def __init__(self,cfg):
         self.warmup=int(cfg.get("AI_START_AFTER",500))
         self.unlocked=False
-
     def unlock(self, deck, runner):
         if self.unlocked: return
         if (deck.df.status=="pass").sum()>=self.warmup:
             runner.enable_ai()
             self.unlocked=True
             print("[AI] unlocked")
-
     def reward(self,status,chi2):
         if status!="pass": return -1e6
         return -float(chi2)
-
 class FlatDetector:
     def __init__(self,w,eps,p):
         self.w,self.eps,self.p=w,eps,p
         self.buf=[]; self.cnt=0
-
     def push(self,x):
         if not np.isfinite(x): return
         self.buf.append(x)
         if len(self.buf)>self.w: self.buf.pop(0)
         if len(self.buf)<self.w: self.cnt=0; return
         self.cnt=self.cnt+1 if np.std(self.buf)<self.eps else 0
-
     def flat(self): return self.cnt>=self.p
 
 # ============================================================
 # Runner
 # ============================================================
-
+# Generates candidate parameter vectors and updates exploration
+# strategy based on past successful runs.
 class Runner:
     def __init__(self,cfg):
         self.cfg=cfg
@@ -177,37 +166,30 @@ class Runner:
         self.dim=len(self.cols)
         self.batch=int(cfg["BATCH_SIZE"])
         self.min_d=float(cfg["MIN_DISTANCE"])
-
         self.ai=False
         self.model=None; self.agent=None
         self.opt_m=None; self.opt_a=None
-
         self.noise0=float(cfg.get("AI_NOISE_INIT",0.3))
         self.noise1=float(cfg.get("AI_NOISE_MIN",0.02))
         self.tau=float(cfg.get("AI_NOISE_TAU",5000))
         self.step=0
-
         self.recent=deque(maxlen=5000)
         self.scaler=IdentityScaler() if StandardScaler is None else StandardScaler()
         self.scaled=False
-
     def enable_ai(self):
         self.model=Model(self.dim)
         self.agent=Agent(self.dim)
         self.opt_m=torch.optim.Adam(self.model.parameters(),1e-3)
         self.opt_a=torch.optim.Adam(self.agent.parameters(),1e-3)
         self.ai=True
-
     def _noise(self):
         if not self.ai: return self.noise0
         return max(self.noise1, self.noise0*np.exp(-self.step/self.tau))
-
     def _base(self,deck):
         good=deck.df[deck.df.status=="pass"]
         if len(good)>=10:
             return good.nsmallest(min(len(good),500),"chi2")[self.cols].sample(1).values[0]
         return deck.df[self.cols].dropna().sample(1).values[0]
-
     def propose(self,deck):
         out=[]
         while len(out)<self.batch:
@@ -219,52 +201,41 @@ class Runner:
                        for i,(lo,hi) in enumerate(self.bounds)]
             else:
                 theta=random_theta(self.bounds)
-
             if deck.is_forbidden(theta): continue
             if min_dist(theta,self.recent)<self.min_d: continue
             if deck.nearest_distance(theta,self.min_d)<self.min_d: continue
-
             self.recent.append(theta)
             self.step+=1
             out.append((theta,self.step))
         return out
-
     def train(self,deck):
         if not self.ai: return
         df=deck.df[(deck.df.status=="pass") & np.isfinite(deck.df.reward)]
         if len(df)<200: return
-
         X=df[self.cols].values
         y=df.reward.values.reshape(-1,1)
-
         if not self.scaled:
             self.scaler.fit(X); self.scaled=True
-
         Xt=torch.tensor(self.scaler.transform(X),dtype=torch.float32)
         yt=torch.tensor(y,dtype=torch.float32)
-
         loss=((self.model(Xt)-yt)**2).mean()
         self.opt_m.zero_grad(); loss.backward(); self.opt_m.step()
 
 # ============================================================
 # Daemon
 # ============================================================
-
+# Main orchestration loop.
+# Explores parameter space, records outcomes, and terminates
+# when information gain flattens or run limits are reached.
 def run_daemon(config, physics_engine):
-
     deck=Deck(config)
     runner=Runner(config)
     corpo=Corpo(physics_engine)
     fixer=Fixer(config)
-    flat=FlatDetector(
-        config.get("FLAT_WINDOW",200),
-        config.get("FLAT_THRESHOLD",1e-6),
-        config.get("FLAT_PATIENCE",3)
-    )
-
+    flat=FlatDetector( config.get("FLAT_WINDOW",200),
+        config.get("FLAT_THRESHOLD",1e-6), config.get("FLAT_PATIENCE",3) )
     runs=0
     best=np.inf
-
     while runs<config["MAX_RUNS"]:
         for theta,pid in runner.propose(deck):
             status,chi2=corpo.eval(theta)
@@ -272,15 +243,11 @@ def run_daemon(config, physics_engine):
             deck.add(theta,chi2,reward,pid,status)
             flat.push(chi2)
             fixer.unlock(deck,runner)
-
             if chi2<best: best=chi2
             runs+=1
-
             if flat.flat():
                 deck.save()
                 print(f"[Daemon] Flat region detected after {runs} runs")
                 return
-
         runner.train(deck)
-
     deck.save()
