@@ -272,48 +272,47 @@ function orbit_to_sigma2_profile(; r_arr, th_arr, vr_arr, xLz, r_centers_m, edge
     sig2
 end
 
-# ---- physically gated apocenter launch ----
-function launch_orbit_apocenter(; rapo::Float64, theta0::Float64, Lz_frac::Float64, pot, frc,
-    r0_frac::Float64=0.98, dt_frac::Float64=0.01, dt_floor::Float64=1e-30, debug::Bool=false)
-
-    ss=_ssin(theta0)
-    frs,_=frc(rapo,ss)
-
-    # physical gate: at apocenter for attractive potential, radial force must be inward (negative)
-    if !(isfinite(frs) && isfinite(rapo) && rapo>0 && frs<0)
-        return (nothing,0.0,0.0,0.0,:reject_force)
+# ---- physically gated apocenter launch (numerically robust) ----
+function launch_orbit_apocenter(; rapo::Float64, theta0::Float64, Lz_frac::Float64,
+    pot, frc, r0_frac::Float64=0.98, dt_frac::Float64=0.01, dt_floor::Float64=1e-30, debug::Bool=false)
+    # numerical tolerances (machine-scale, not physical-scale)
+    const EPS_FORCE = 1e-14
+    const EPS_VEL   = 1e-14
+    const EPS_ARG   = 1e-14
+    ss = _ssin(theta0)
+    frs, _ = frc(rapo, ss)
+    # apocenter requires inward force, beyond numerical noise
+    if !(isfinite(frs) && isfinite(rapo) && rapo > 0.0 && frs < -EPS_FORCE)
+        return (nothing, 0.0, 0.0, 0.0, :reject_force)
     end
-
-    vc=sqrt((-frs)*rapo)
-    if !(isfinite(vc) && vc>0)
-        return (nothing,0.0,0.0,0.0,:reject_vc)
+    vc = sqrt(max((-frs) * rapo, 0.0))
+    if !(isfinite(vc) && vc > EPS_VEL)
+        return (nothing, 0.0, 0.0, 0.0, :reject_vc)
     end
-
-    Lz=Lz_frac*rapo*vc
-
-    Papo=pot(rapo,ss)
+    Lz = Lz_frac * rapo * vc
+    Papo = pot(rapo, ss)
     if !isfinite(Papo)
-        return (nothing,0.0,0.0,vc,:reject_pot)
+        return (nothing, 0.0, 0.0, vc, :reject_pot)
     end
-
-    E=Papo + (Lz^2)/(2*rapo^2*ss^2)
-
-    r0=r0_frac*rapo
-    P0=pot(r0,ss)
+    E = Papo + (Lz^2) / (2 * rapo^2 * ss^2)
+    r0 = r0_frac * rapo
+    P0 = pot(r0, ss)
     if !isfinite(P0)
-        return (nothing,0.0,E,vc,:reject_pot0)
+        return (nothing, 0.0, E, vc, :reject_pot0)
     end
-
-    arg=2*(E-P0) - (Lz^2)/(r0^2*ss^2)
-    if !(isfinite(arg) && arg>0)
-        return debug ? ((rapo,theta0,Lz,arg),Lz,E,vc,:reject_turning) : (nothing,Lz,E,vc,:reject_turning)
+    arg = 2 * (E - P0) - (Lz^2) / (r0^2 * ss^2)
+    # turning-point condition with numerical slack
+    if !(isfinite(arg) && arg > EPS_ARG)
+        return debug ?
+            ((rapo, theta0, Lz, arg), Lz, E, vc, :reject_turning) :
+            (nothing, Lz, E, vc, :reject_turning)
     end
-
-    vr0=-sqrt(arg)
-    Om=abs(vc/r0)
-    dt=dt_frac/max(Om,1e-30)
-    ((r0,theta0,dt,vr0,0.0),Lz,E,vc,:ok)
+    vr0 = -sqrt(arg)
+    Om  = abs(vc / r0)
+    dt  = dt_frac / max(Om, dt_floor)
+    return ((r0, theta0, dt, vr0, 0.0), Lz, E, vc, :ok)
 end
+
 
 # ======================================================================
 # HYBRID A-MATRIX:
