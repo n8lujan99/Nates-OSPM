@@ -1,4 +1,5 @@
 module OSPMPhysicsSpherical
+@info "OSPMPhysicsSpherical loaded from" @__FILE__
 
 using LinearAlgebra, StaticArrays, Statistics, Random, Base.Threads
 
@@ -14,6 +15,16 @@ const G    = 6.67430e-11
 const c    = 2.99792458e8
 const pc   = 3.0856775814913673e16
 const Msun = 1.98847e30
+# machine floors
+const EPS_FORCE = 1e-14
+const EPS_VEL   = 1e-14
+const EPS_ARG   = 1e-14
+# physical geometry gate
+const EPS_SIN = 1e-6
+# scale-aware force gate
+const REL_FORCE    = 1e-10   # loosen to 1e-9 if needed
+const BRACKET_FRAC = 1e-6    # MUST be >> eps(Float64)
+const _dbg_orbit_count=Ref(0)
 
 @inline f64(x)=Float64(x)
 @inline safe_sign(x)=x>0 ? 1.0 : (x<0 ? -1.0 : 0.0)
@@ -233,7 +244,6 @@ function integrate_orbit_rk4(; ic, xLz, ctx, nsteps=4000, stop_rmin_factor=1.001
     r,vr,theta
 end
 
-const _dbg_orbit_count=Ref(0)
 
 function orbit_to_sigma2_profile(; r_arr, th_arr, vr_arr, xLz, r_centers_m, edges, sini)
     nb=length(r_centers_m)
@@ -272,22 +282,40 @@ function orbit_to_sigma2_profile(; r_arr, th_arr, vr_arr, xLz, r_centers_m, edge
     sig2
 end
 
-# ---- physically gated apocenter launch (numerically robust) ----
 function launch_orbit_apocenter(; rapo::Float64, theta0::Float64, Lz_frac::Float64,
-    pot, frc, r0_frac::Float64=0.98, dt_frac::Float64=0.01, dt_floor::Float64=1e-30, debug::Bool=false)
-    # numerical tolerances (machine-scale, not physical-scale)
-    const EPS_FORCE = 1e-14
-    const EPS_VEL   = 1e-14
-    const EPS_ARG   = 1e-14
+    pot, frc, r0_frac::Float64=0.98, dt_frac::Float64=0.01, dt_floor::Float64=1e-30,
+    debug::Bool=true)
     ss = _ssin(theta0)
+    if !(isfinite(ss) && abs(ss) > EPS_SIN)
+        return (nothing, 0.0, 0.0, 0.0, :reject_sin)
+    end
     frs, _ = frc(rapo, ss)
-    # apocenter requires inward force, beyond numerical noise
-    if !(isfinite(frs) && isfinite(rapo) && rapo > 0.0 && frs < -EPS_FORCE)
+    if !(isfinite(frs) && isfinite(rapo) && rapo > 0.0)
         return (nothing, 0.0, 0.0, 0.0, :reject_force)
     end
-    vc = sqrt(max((-frs) * rapo, 0.0))
+    r_in  = rapo * (1 - BRACKET_FRAC)
+    r_out = rapo * (1 + BRACKET_FRAC)
+    fr_in,  _ = frc(r_in,  ss)
+    fr_out, _ = frc(r_out, ss)
+    fr_scale = max(abs(frs), abs(fr_in), abs(fr_out), EPS_FORCE)
+    fr_tol   = max(EPS_FORCE, REL_FORCE * fr_scale)
+    # inward is negative; allow a small ambiguous band
+    if frs > fr_tol
+        return debug ?
+            ((rapo, theta0, ss, frs, fr_tol, fr_scale), 0.0, 0.0, 0.0, :reject_force) :
+            (nothing, 0.0, 0.0, 0.0, :reject_force)
+    end
+    # Option 2: regularize vc if force is mushy
+    vc2 = (-frs) * rapo
+    if vc2 <= 0.0
+        vc2 = fr_tol * rapo
+    end
+    vc = sqrt(vc2)
+
     if !(isfinite(vc) && vc > EPS_VEL)
-        return (nothing, 0.0, 0.0, 0.0, :reject_vc)
+        return debug ?
+            ((rapo, theta0, ss, frs, vc, EPS_VEL), 0.0, 0.0, 0.0, :reject_vc) :
+            (nothing, 0.0, 0.0, 0.0, :reject_vc)
     end
     Lz = Lz_frac * rapo * vc
     Papo = pot(rapo, ss)
@@ -301,7 +329,6 @@ function launch_orbit_apocenter(; rapo::Float64, theta0::Float64, Lz_frac::Float
         return (nothing, 0.0, E, vc, :reject_pot0)
     end
     arg = 2 * (E - P0) - (Lz^2) / (r0^2 * ss^2)
-    # allow near-zero turning points; reject only clearly unphysical cases
     if !(isfinite(arg) && arg > -EPS_ARG)
         return debug ?
             ((rapo, theta0, Lz, arg), Lz, E, vc, :reject_turning) :

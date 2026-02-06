@@ -61,7 +61,8 @@ CONFIG = {
     # =========================================================
     # OSPM numerical setup
     # =========================================================
-    "NORBIT":              50,   # keep parity with Draco unless intentionally reduced
+
+    "NORBIT":              800,   # RESOLUTION
     "BINNING": {
         "MIN_BINS":            5,
         "N_TARGET_CIRC":       5,

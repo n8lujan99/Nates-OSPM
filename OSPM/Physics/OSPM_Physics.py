@@ -5,24 +5,40 @@ import os, numpy as np
 
 USE_JULIA=os.environ.get("OSPM_USE_JULIA","0").strip().lower() in ("1","true","yes")
 _JL_READY=False; _Main=None
+print("[PY] OSPM_Physics imported from:", __file__)
 
 pc=3.085677581e16; kms=1.0e3; Msun=1.98847e30; G=6.67430e-11; c=2.99792458e8
 _LAST_SIG=None
 
 def _jl_init():
-    global _JL_READY,_Main
-    if _JL_READY: return
-    if not USE_JULIA: raise RuntimeError("OSPM_USE_JULIA is not enabled")
+    global _JL_READY, _Main
+    if _JL_READY:
+        return
+
+    if not USE_JULIA:
+        raise RuntimeError("OSPM_USE_JULIA is not enabled")
+
     from julia.api import Julia
     Julia(compiled_modules=False)
+
     from julia import Main as _JuliaMain
-    _Main=_JuliaMain
-    here=os.path.dirname(os.path.abspath(__file__))
-    jl_path=os.path.join(here,"OSPM_Physics_Spherical.jl")
-    if not os.path.exists(jl_path): raise FileNotFoundError(f"Julia backend file not found: {jl_path}")
-    _Main.include(jl_path)
-    if not hasattr(_Main,"OSPMPhysicsSpherical"): raise RuntimeError("Julia loaded but module OSPMPhysicsSpherical not found in Main")
-    _JL_READY=True
+    _Main = _JuliaMain
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    jl_path = os.path.join(here, "OSPM_Physics_Spherical.jl")
+    if not os.path.exists(jl_path):
+        raise FileNotFoundError(f"Julia backend file not found: {jl_path}")
+
+    # include only once per Julia session
+    if not hasattr(_Main, "OSPMPhysicsSpherical"):
+        _Main.include(jl_path)
+
+    if not hasattr(_Main, "OSPMPhysicsSpherical"):
+        raise RuntimeError("OSPMPhysicsSpherical failed to load into Main")
+
+    _JL_READY = True
+
+
 
 def _theta_sig(theta,halo_type):
     t=np.asarray(theta,float).ravel()
