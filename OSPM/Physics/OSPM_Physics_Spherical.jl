@@ -301,13 +301,13 @@ function launch_orbit_apocenter(; rapo::Float64, theta0::Float64, Lz_frac::Float
         return (nothing, 0.0, E, vc, :reject_pot0)
     end
     arg = 2 * (E - P0) - (Lz^2) / (r0^2 * ss^2)
-    # turning-point condition with numerical slack
-    if !(isfinite(arg) && arg > EPS_ARG)
+    # allow near-zero turning points; reject only clearly unphysical cases
+    if !(isfinite(arg) && arg > -EPS_ARG)
         return debug ?
             ((rapo, theta0, Lz, arg), Lz, E, vc, :reject_turning) :
             (nothing, Lz, E, vc, :reject_turning)
     end
-    vr0 = -sqrt(arg)
+    vr0 = -sqrt(max(arg, 0.0))
     Om  = abs(vc / r0)
     dt  = dt_frac / max(Om, dt_floor)
     return ((r0, theta0, dt, vr0, 0.0), Lz, E, vc, :ok)
