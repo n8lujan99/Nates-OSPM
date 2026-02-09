@@ -26,33 +26,33 @@ source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
 
 # -------------------------------------------------
-# Julia verification (juliaup)
+# Julia verification (portable)
 # -------------------------------------------------
-JULIA_BIN="$HOME/.juliaup/bin/julia"
 
-if [ ! -x "$JULIA_BIN" ]; then
-    echo "[setup] ERROR: juliaup Julia not found"
-    echo "[setup] Install via: curl -fsSL https://install.julialang.org | sh"
+if command -v julia >/dev/null 2>&1; then
+    JULIA_BIN="$(command -v julia)"
+elif [ -x "$HOME/julia-1.10.10/bin/julia" ]; then
+    JULIA_BIN="$HOME/julia-1.10.10/bin/julia"
+    export PATH="$HOME/julia-1.10.10/bin:$PATH"
+else
+    echo "[setup] ERROR: Julia not found"
     exit 2
 fi
 
-export PATH="$HOME/.juliaup/bin:$PATH"
 export JULIA_DEPOT_PATH="$HOME/.julia"
-
 echo "[setup] Julia version:"
 "$JULIA_BIN" --version
-
 echo "[setup] Warming up Julia runtime"
 unset LD_LIBRARY_PATH
 unset LD_PRELOAD
 "$JULIA_BIN" -e 'println("Julia runtime OK")'
-
 echo "[setup] Checking PyJulia"
 python - <<EOF
 from julia.api import Julia
 Julia(runtime="$JULIA_BIN", compiled_modules=False)
 print("[setup] PyJulia OK")
 EOF
+
 
 # -------------------------------------------------
 # Python deps
