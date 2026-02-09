@@ -34,20 +34,18 @@ export JULIA_DEPOT_PATH="$HOME/.julia"
 
 _LD_LIBRARY_PATH_SAVED="${LD_LIBRARY_PATH-}"
 _LD_PRELOAD_SAVED="${LD_PRELOAD-}"
-
-unset LD_LIBRARY_PATH
-unset LD_PRELOAD
-"$JULIA_BIN" -e 'println("Julia runtime OK")'
-
+(
+    unset LD_LIBRARY_PATH
+    unset LD_PRELOAD
+    "$JULIA_BIN" -e 'println("Julia runtime OK")'
+)
 export LD_LIBRARY_PATH="$_LD_LIBRARY_PATH_SAVED"
 export LD_PRELOAD="$_LD_PRELOAD_SAVED"
-
 python3 - <<EOF || echo "[setup] PyJulia skipped"
 from julia.api import Julia
 Julia(runtime="$JULIA_BIN", compiled_modules=False)
 print("[setup] PyJulia OK")
 EOF
-
 python3 - <<EOF
 import subprocess, sys
 req = ["numpy","scipy","pandas","matplotlib","astropy","torch"]
@@ -55,5 +53,4 @@ missing=[p for p in req if __import__(p,fromlist=["*"]) is None]
 if missing:
     subprocess.check_call([sys.executable,"-m","pip","install","-r","$REQ_FILE"])
 EOF
-
 echo "[setup] Environment ready"
