@@ -14,39 +14,24 @@ def _jl_init():
     global _JL_READY, _Main
     if _JL_READY:
         return
-
     if not USE_JULIA:
         raise RuntimeError("OSPM_USE_JULIA is not enabled")
-    import shutil, subprocess
-
-    julia_exe = os.path.join(os.path.expanduser("~"), "julia-1.9.4", "bin", "julia")
-    if not os.path.exists(julia_exe):
-        raise FileNotFoundError(f"Julia runtime not found at: {julia_exe}")
-
-    # quick sanity: make sure julia can start in this environment
-    try:
-        subprocess.check_output([julia_exe, "-e", "println(VERSION)"])
-    except Exception as e:
-        raise RuntimeError(
-            "Julia runtime failed to start. "
-            "On LS6 this is usually LD_LIBRARY_PATH/LD_PRELOAD contamination. "
-            "Fix in utils/start by unsetting those before running Python."
-        ) from e
-
     from julia.api import Julia
-    Julia(
-        runtime=os.path.join(os.path.expanduser("~"), "julia-1.9.4", "bin", "julia"), compiled_modules=False)
+    import shutil, os
+    julia_exe = os.environ.get("JULIA_RUNTIME")
+    if julia_exe is None:
+        julia_exe = shutil.which("julia")
+    if julia_exe is None:
+        raise FileNotFoundError("Julia executable not found on PATH")
+    Julia(runtime=julia_exe, compiled_modules=False)
     from julia import Main as _JuliaMain
     _Main = _JuliaMain
     here = os.path.dirname(os.path.abspath(__file__))
     jl_path = os.path.join(here, "OSPM_Physics_Spherical.jl")
     if not os.path.exists(jl_path):
         raise FileNotFoundError(f"Julia backend file not found: {jl_path}")
-    # include only once per Julia session
     if not hasattr(_Main, "OSPMPhysicsSpherical"):
         _Main.include(jl_path)
-    if not hasattr(_Main, "OSPMPhysicsSpherical"):
-        raise RuntimeError("OSPMPhysicsSpherical failed to load into Main")
     _JL_READY = True
 
 def _theta_sig(theta,halo_type):
