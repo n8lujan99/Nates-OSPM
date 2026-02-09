@@ -112,6 +112,8 @@ class Deck:
 # accepted; all failures are hard rejections.
 
 class Corpo:
+    def __init__(self, engine):
+        self.engine = engine
     def eval(self, theta):
         try:
             chi2=float(self.engine(theta))
