@@ -53,10 +53,10 @@ source "$VENV_DIR/bin/activate"
 
 echo "[setup] Upgrading pip"
 pip install --upgrade pip
+
 # -------------------------------------------------
 # Julia (required for stellar mode)
 # -------------------------------------------------
-
 if [[ "${OSPM_USE_JULIA:-0}" == "1" ]]; then
     echo "[setup] Julia required (OSPM_USE_JULIA=1)"
 
@@ -92,6 +92,16 @@ if [[ "${OSPM_USE_JULIA:-0}" == "1" ]]; then
         echo "[setup] Julia found: $(which julia)"
     fi
 
+    # >>> ADD THESE LINES EXACTLY HERE <<<
+
+    # Ensure Julia depot is writable and local
+    export JULIA_DEPOT_PATH="$HOME/.julia"
+
+    echo "[setup] Warming up Julia runtime"
+    julia -e 'println("Julia first-run OK")'
+
+    # <<< END ADDITION <<<
+
     # Verify PyJulia can initialize
     python - <<EOF
 from julia.api import Julia
@@ -99,6 +109,7 @@ Julia(compiled_modules=False)
 print("[setup] PyJulia initialized successfully")
 EOF
 fi
+
 
 # -------------------------------------------------
 # Install requirements if needed

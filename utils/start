@@ -13,12 +13,12 @@ WHICH_FILE="$ROOT/which_galaxy"
 export OSPM_USE_JULIA=1
 export PYJULIA_USE_PYTHONCALL=1
 export PYTHONPATH="$ROOT"
-# Julia was installed by setup, ensure it is visible
+# Julia location (installed once by setup)
 JULIA_DIR="$HOME/julia-1.9.4"
 if [ -d "$JULIA_DIR/bin" ]; then
     export PATH="$JULIA_DIR/bin:$PATH"
+    export JULIA_DEPOT_PATH="$HOME/.julia"
 fi
-
 # -------------------------------------------------
 # Galaxy selection
 # -------------------------------------------------
