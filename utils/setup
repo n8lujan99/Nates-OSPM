@@ -53,6 +53,52 @@ source "$VENV_DIR/bin/activate"
 
 echo "[setup] Upgrading pip"
 pip install --upgrade pip
+# -------------------------------------------------
+# Julia (required for stellar mode)
+# -------------------------------------------------
+
+if [[ "${OSPM_USE_JULIA:-0}" == "1" ]]; then
+    echo "[setup] Julia required (OSPM_USE_JULIA=1)"
+
+    if ! command -v julia >/dev/null 2>&1; then
+        echo "[setup] Julia not found on PATH"
+
+        # Detect HPC (Slurm is the cleanest signal)
+        if [[ -n "${SLURM_JOB_ID:-}" || -n "${TACC_SYSTEM:-}" ]]; then
+            echo "[setup] HPC environment detected — installing user-local Julia"
+
+            JULIA_VER="1.9.4"
+            JULIA_DIR="$HOME/julia-$JULIA_VER"
+            JULIA_TAR="julia-$JULIA_VER-linux-x86_64.tar.gz"
+            JULIA_URL="https://julialang-s3.julialang.org/bin/linux/x64/1.9/$JULIA_TAR"
+
+            if [ ! -d "$JULIA_DIR" ]; then
+                echo "[setup] Downloading Julia $JULIA_VER"
+                cd "$HOME"
+                wget -q "$JULIA_URL"
+                tar -xzf "$JULIA_TAR"
+                rm -f "$JULIA_TAR"
+            else
+                echo "[setup] Julia already installed at $JULIA_DIR"
+            fi
+
+            export PATH="$JULIA_DIR/bin:$PATH"
+        else
+            echo "[setup] ERROR: Julia required but not found on PATH"
+            echo "[setup] Install Julia or unset OSPM_USE_JULIA"
+            exit 2
+        fi
+    else
+        echo "[setup] Julia found: $(which julia)"
+    fi
+
+    # Verify PyJulia can initialize
+    python - <<EOF
+from julia.api import Julia
+Julia(compiled_modules=False)
+print("[setup] PyJulia initialized successfully")
+EOF
+fi
 
 # -------------------------------------------------
 # Install requirements if needed
