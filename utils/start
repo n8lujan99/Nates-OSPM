@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WHICH_FILE="$ROOT/which_galaxy"
+PY="$ROOT/.venv/bin/python"
 export OSPM_USE_JULIA=1
 export PYJULIA_USE_PYTHONCALL=1
 export JULIA_PYTHON=""
@@ -23,8 +24,8 @@ unset LD_PRELOAD
 GALAXY="$(tr -d '[:space:]' < "$WHICH_FILE")"
 echo "[START] Repo root: $ROOT"
 echo "[START] Galaxy: $GALAXY"
-python3 - <<'PY'
+"$PY" - <<'PY'
 from OSPM.Physics import OSPM_Physics as P
 print("[CHECK] USE_JULIA:", P.USE_JULIA)
 PY
-python3 -m OSPM.Controllers.OSPM_RUN
+"$PY" -m OSPM.Controllers.OSPM_RUN
