@@ -3,26 +3,20 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WHICH_FILE="$ROOT/which_galaxy"
-
 export OSPM_USE_JULIA=1
 export PYJULIA_USE_PYTHONCALL=1
 export PYTHONPATH="$ROOT"
 export PATH="$HOME/.juliaup/bin:$PATH"
 export JULIA_DEPOT_PATH="$HOME/.julia"
-
 unset LD_LIBRARY_PATH
 unset LD_PRELOAD
-
 julia -e 'println("Julia runtime ready")'
-
 GALAXY="$(tr -d '[:space:]' < "$WHICH_FILE")"
 echo "[START] Repo root: $ROOT"
 echo "[START] Galaxy: $GALAXY"
-
 python - <<'PY'
 import os
 from OSPM.Physics import OSPM_Physics as P
 print("[CHECK] USE_JULIA:", P.USE_JULIA)
 PY
-
 python -m OSPM.Controllers.OSPM_RUN

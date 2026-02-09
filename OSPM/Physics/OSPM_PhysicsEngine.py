@@ -90,7 +90,6 @@ def wrap_physics_engine(base_engine, *, obs, halo_type, config=None):
     p1=float(cfg.get("PEN_SPHERE_POWER",2.0))
     s2=float(cfg.get("PEN_SLOPE_STRENGTH",0.5))
     print_every=int(cfg.get("PRINT_EVERY",_PRINT_EVERY))
-
     R_star_m=getattr(obs,"R_star_m",None)
     v_star_mps=getattr(obs,"v_star_mps",None)
     verr_star_mps=getattr(obs,"verr_star_mps",None)
@@ -100,29 +99,23 @@ def wrap_physics_engine(base_engine, *, obs, halo_type, config=None):
         verr_star_mps=getattr(obs,"verr_mps",None)
     if R_star_m is None or v_star_mps is None:
         raise AttributeError("obs must expose R_star_m and v_star_mps for penalties")
-
     v_star_mps=np.asarray(v_star_mps,float)
     if verr_star_mps is not None: verr_star_mps=np.asarray(verr_star_mps,float)
 
     def engine(theta):
         global _print_counter
         _print_counter+=1
-        try: A=base_engine(theta,return_A=True)
-        except TypeError: A=base_engine(theta)
-
+        A = base_engine(theta)
         if (_print_counter%50)==0: print("[PHYS] base_engine type:",type(A))
-
         if isinstance(A,(float,int,np.floating,np.integer)):
             chi2=float(A)
         else:
             if A is None: return float("inf")
             A=np.asarray(A,float)
             if A.ndim!=2 or A.size==0: return float("inf")
-
             nrow=A.shape[0]
             b=v_star_mps[:nrow]
             if b.size!=nrow: return float("inf")
-
             w=None
             if verr_star_mps is not None and verr_star_mps.size>=nrow:
                 ve=verr_star_mps[:nrow]

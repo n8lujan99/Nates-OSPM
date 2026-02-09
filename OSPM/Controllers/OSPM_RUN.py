@@ -6,12 +6,12 @@ from ..Physics.OSPM_PhysicsEngine import wrap_physics_engine
 
 def build_physics_engine(config):
     obs = build_observables(config)
-    def base_engine(theta):
-        chi2, _, _ = solve_ospm_theta(theta, obs, 
-                    halo_type=config["HALO_TYPE"])
+    def base_engine(theta, *, return_A=False, **_ignored):
+        chi2, A, meta = solve_ospm_theta(theta, obs, halo_type=config["HALO_TYPE"])
+        if return_A:
+            return A
         return float(chi2)
-    return wrap_physics_engine( base_engine, obs=obs,
-         halo_type=config["HALO_TYPE"], config=config)
+    return wrap_physics_engine(base_engine, obs=obs, halo_type=config["HALO_TYPE"], config=config)
 def main():
     config = load_config()
     runtime = build_runtime(config)
