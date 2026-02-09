@@ -1,44 +1,29 @@
 #!/usr/bin/env bash
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then set -euo pipefail; fi
+
+# ---- identity ----
 export OSPM_USE_JULIA=1
-export JULIA_DEPOT_PATH=/scratch/09909/n8lujan99/.julia
 export JULIA_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export OMP_NUM_THREADS=1
-unset LD_LIBRARY_PATH
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$ROOT_DIR/.venv"
 REQ_FILE="$ROOT_DIR/utils/_Setup/requirements.txt"
+
 echo "[setup] OSPM root: $ROOT_DIR"
+
+# ---- Python (must run with module LD_LIBRARY_PATH intact) ----
 command -v python >/dev/null 2>&1 || { echo "[setup] ERROR: python not found"; exit 1; }
-[ -d "$VENV_DIR" ] || python -m venv "$VENV_DIR"
+
+if [ ! -d "$VENV_DIR" ]; then
+  python -m venv "$VENV_DIR"
+fi
+
 source "$VENV_DIR/bin/activate"
 python -m pip install --upgrade pip
-if command -v julia >/dev/null 2>&1; then
-  JULIA_BIN="$(command -v julia)"
-elif [ -x "$HOME/julia-1.10.10/bin/julia" ]; then
-  JULIA_BIN="$HOME/julia-1.10.10/bin/julia"
-  export PATH="$HOME/julia-1.10.10/bin:$PATH"
-else
-  echo "[setup] ERROR: julia not found"
-  exit 2
-fi
-export JULIA_DEPOT_PATH="$HOME/.julia"
-echo "[setup] Julia version:"
-"$JULIA_BIN" --version
-python - <<EOF || echo "[setup] PyJulia skipped"
-from julia.api import Julia
-import os
-_ld=os.environ.pop("LD_LIBRARY_PATH",None)
-_lp=os.environ.pop("LD_PRELOAD",None)
-try:
-    Julia(runtime="$JULIA_BIN", compiled_modules=False)
-    print("[setup] PyJulia OK")
-finally:
-    if _ld is not None: os.environ["LD_LIBRARY_PATH"]=_ld
-    if _lp is not None: os.environ["LD_PRELOAD"]=_lp
-EOF
+
+# ---- Python deps ----
 python - <<EOF
 import subprocess, sys
 required=["numpy","scipy","pandas","matplotlib","astropy","torch"]
@@ -49,4 +34,32 @@ for p in required:
 if missing:
     subprocess.check_call([sys.executable,"-m","pip","install","-r","$REQ_FILE"])
 EOF
+
+# ---- Julia (clean env AFTER python) ----
+export JULIA_DEPOT_PATH=/scratch/09909/n8lujan99/.julia
+
+# now safe to clean
+unset LD_LIBRARY_PATH
+unset LD_PRELOAD
+
+if command -v julia >/dev/null 2>&1; then
+  JULIA_BIN="$(command -v julia)"
+elif [ -x "/scratch/09909/n8lujan99/julia-1.10.10/bin/julia" ]; then
+  JULIA_BIN="/scratch/09909/n8lujan99/julia-1.10.10/bin/julia"
+  export PATH="$(dirname "$JULIA_BIN"):$PATH"
+else
+  echo "[setup] ERROR: julia not found"
+  exit 2
+fi
+
+echo "[setup] Julia version:"
+"$JULIA_BIN" --version
+
+# ---- PyJulia (optional, isolated) ----
+python - <<EOF || echo "[setup] PyJulia skipped"
+from julia.api import Julia
+Julia(runtime="$JULIA_BIN", compiled_modules=False)
+print("[setup] PyJulia OK")
+EOF
+
 echo "[setup] Environment ready"
