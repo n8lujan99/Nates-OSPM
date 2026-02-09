@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-set -e
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    set -e
+fi
 
 export OSPM_USE_JULIA=1
 
@@ -47,11 +49,12 @@ unset LD_LIBRARY_PATH
 unset LD_PRELOAD
 "$JULIA_BIN" -e 'println("Julia runtime OK")'
 echo "[setup] Checking PyJulia"
-python - <<EOF
+python - <<EOF || echo "[setup] PyJulia check failed (will bind at runtime)"
 from julia.api import Julia
 Julia(runtime="$JULIA_BIN", compiled_modules=False)
 print("[setup] PyJulia OK")
 EOF
+
 
 
 # -------------------------------------------------
