@@ -20,6 +20,12 @@ if [ -d "$JULIA_DIR/bin" ]; then
     export JULIA_DEPOT_PATH="$HOME/.julia"
 fi
 # -------------------------------------------------
+# Julia runtime warmup (required on HPC)
+# -------------------------------------------------
+if command -v julia >/dev/null 2>&1; then
+    julia -e 'println("Julia runtime ready")'
+fi
+# -------------------------------------------------
 # Galaxy selection
 # -------------------------------------------------
 if [ ! -f "$WHICH_FILE" ]; then
