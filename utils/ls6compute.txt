@@ -1,0 +1,10 @@
+
+module purge
+module load python/3.12.11
+module load gcc/12.2.0
+source .venv/bin/activate
+which python
+python --version        # should be 3.12.11
+which julia
+julia --version         # should be 1.10.10
+bash utils/start

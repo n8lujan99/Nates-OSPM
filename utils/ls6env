@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+module purge
+module load python/3.12.11
+module load gcc/12.2.0
+
+export OSPM_USE_JULIA=1
+export JULIA_DEPOT_PATH=/scratch/$USER/.julia
+export OSPM_JULIA_EXE=/scratch/$USER/julia-1.10.10/bin/julia
+
+export XDG_CACHE_HOME=/scratch/$USER/.cache
+export XDG_DATA_HOME=/scratch/$USER/.local
+export SLURM_TMPDIR=/scratch/$USER/.slurm
+
+source /scratch/$USER/Nates-OSPM/.venv/bin/activate
