@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    set -e
-fi
+set -e
 
 export OSPM_USE_JULIA=1
 
@@ -11,25 +9,14 @@ REQ_FILE="$ROOT_DIR/utils/_Setup/requirements.txt"
 
 echo "[setup] OSPM root: $ROOT_DIR"
 
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "[setup] ERROR: python3 not found"
-    exit 1
-fi
+command -v python3 >/dev/null 2>&1 || { echo "[setup] ERROR: python3 not found"; exit 1; }
 
 if [ ! -d "$VENV_DIR" ]; then
-    echo "[setup] Creating venv"
     python3 -m venv "$VENV_DIR"
-else
-    echo "[setup] venv exists"
 fi
 
 source "$VENV_DIR/bin/activate"
-
 pip install --upgrade pip
-
-# -------------------------------------------------
-# Julia verification (portable)
-# -------------------------------------------------
 
 if command -v julia >/dev/null 2>&1; then
     JULIA_BIN="$(command -v julia)"
@@ -42,31 +29,29 @@ else
 fi
 
 export JULIA_DEPOT_PATH="$HOME/.julia"
-echo "[setup] Julia version:"
+
 "$JULIA_BIN" --version
-echo "[setup] Warming up Julia runtime"
+
+_LD_LIBRARY_PATH_SAVED="${LD_LIBRARY_PATH-}"
+_LD_PRELOAD_SAVED="${LD_PRELOAD-}"
+
 unset LD_LIBRARY_PATH
 unset LD_PRELOAD
 "$JULIA_BIN" -e 'println("Julia runtime OK")'
-echo "[setup] Checking PyJulia"
-python - <<EOF || echo "[setup] PyJulia check failed (will bind at runtime)"
+
+export LD_LIBRARY_PATH="$_LD_LIBRARY_PATH_SAVED"
+export LD_PRELOAD="$_LD_PRELOAD_SAVED"
+
+python3 - <<EOF || echo "[setup] PyJulia skipped"
 from julia.api import Julia
 Julia(runtime="$JULIA_BIN", compiled_modules=False)
 print("[setup] PyJulia OK")
 EOF
 
-
-
-# -------------------------------------------------
-# Python deps
-# -------------------------------------------------
-python - <<EOF
+python3 - <<EOF
 import subprocess, sys
-required = ["numpy","scipy","pandas","matplotlib","astropy","torch"]
-missing = []
-for p in required:
-    try: __import__(p)
-    except ImportError: missing.append(p)
+req = ["numpy","scipy","pandas","matplotlib","astropy","torch"]
+missing=[p for p in req if __import__(p,fromlist=["*"]) is None]
 if missing:
     subprocess.check_call([sys.executable,"-m","pip","install","-r","$REQ_FILE"])
 EOF
