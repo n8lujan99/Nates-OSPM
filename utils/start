@@ -22,15 +22,22 @@ fi
 # -------------------------------------------------
 # HPC linker detox (Julia must use its own libs)
 # -------------------------------------------------
-unset LD_LIBRARY_PATH
-unset LD_PRELOAD
-
 # -------------------------------------------------
-# Julia runtime warmup (required on HPC)
+# Julia runtime warmup (detoxed, but do NOT break Python)
 # -------------------------------------------------
 if command -v julia >/dev/null 2>&1; then
+    _LD_LIBRARY_PATH_SAVED="${LD_LIBRARY_PATH-}"
+    _LD_PRELOAD_SAVED="${LD_PRELOAD-}"
+
+    unset LD_LIBRARY_PATH
+    unset LD_PRELOAD
+
     julia -e 'println("Julia runtime ready")'
+
+    export LD_LIBRARY_PATH="$_LD_LIBRARY_PATH_SAVED"
+    export LD_PRELOAD="$_LD_PRELOAD_SAVED"
 fi
+
 # -------------------------------------------------
 # Galaxy selection
 # -------------------------------------------------
