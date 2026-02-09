@@ -1,72 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# -------------------------------------------------
-# Paths (MUST come first)
-# -------------------------------------------------
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WHICH_FILE="$ROOT/which_galaxy"
 
-# -------------------------------------------------
-# Required environment
-# -------------------------------------------------
 export OSPM_USE_JULIA=1
 export PYJULIA_USE_PYTHONCALL=1
 export PYTHONPATH="$ROOT"
-# Julia location (installed once by setup)
-JULIA_DIR="$HOME/julia-1.9.4"
-if [ -d "$JULIA_DIR/bin" ]; then
-    export PATH="$JULIA_DIR/bin:$PATH"
-    export JULIA_DEPOT_PATH="$HOME/.julia"
-fi
-# -------------------------------------------------
-# HPC linker detox (Julia must use its own libs)
-# -------------------------------------------------
-# -------------------------------------------------
-# Julia runtime warmup (detoxed, but do NOT break Python)
-# -------------------------------------------------
-if command -v julia >/dev/null 2>&1; then
-    _LD_LIBRARY_PATH_SAVED="${LD_LIBRARY_PATH-}"
-    _LD_PRELOAD_SAVED="${LD_PRELOAD-}"
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_DEPOT_PATH="$HOME/.julia"
 
-    unset LD_LIBRARY_PATH
-    unset LD_PRELOAD
+unset LD_LIBRARY_PATH
+unset LD_PRELOAD
 
-    julia -e 'println("Julia runtime ready")'
+julia -e 'println("Julia runtime ready")'
 
-    export LD_LIBRARY_PATH="$_LD_LIBRARY_PATH_SAVED"
-    export LD_PRELOAD="$_LD_PRELOAD_SAVED"
-fi
-
-# -------------------------------------------------
-# Galaxy selection
-# -------------------------------------------------
-if [ ! -f "$WHICH_FILE" ]; then
-    echo "[ERROR] which_galaxy file not found at repo root"
-    exit 1
-fi
 GALAXY="$(tr -d '[:space:]' < "$WHICH_FILE")"
-if [ -z "$GALAXY" ]; then
-    echo "[ERROR] which_galaxy is empty"
-    exit 1
-fi
 echo "[START] Repo root: $ROOT"
 echo "[START] Galaxy: $GALAXY"
-echo "[START] Julia threads: ${JULIA_NUM_THREADS:-unset}"
-# Environment should already be active via Slurm or shell
-# Do NOT override JULIA_NUM_THREADS here
 
-# -------------------------------------------------
-# Hard latch verification (never remove this)
-# -------------------------------------------------
 python - <<'PY'
 import os
-print("[CHECK] OSPM_USE_JULIA env:", os.environ.get("OSPM_USE_JULIA"))
 from OSPM.Physics import OSPM_Physics as P
-print("[CHECK] USE_JULIA latched:", P.USE_JULIA)
+print("[CHECK] USE_JULIA:", P.USE_JULIA)
 PY
 
-# -------------------------------------------------
-# Run
-# -------------------------------------------------
 python -m OSPM.Controllers.OSPM_RUN

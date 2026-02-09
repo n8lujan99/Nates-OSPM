@@ -1,138 +1,71 @@
 #!/usr/bin/env bash
 set -e
 
-# -------------------------------------------------
-# Required environment (latched once)
-# -------------------------------------------------
 export OSPM_USE_JULIA=1
 
-# -------------------------------------------------
-# Paths
-# -------------------------------------------------
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$ROOT_DIR/.venv"
 REQ_FILE="$ROOT_DIR/utils/_Setup/requirements.txt"
 
 echo "[setup] OSPM root: $ROOT_DIR"
 
-# -------------------------------------------------
-# Python check
-# -------------------------------------------------
 if ! command -v python3 >/dev/null 2>&1; then
     echo "[setup] ERROR: python3 not found"
     exit 1
 fi
 
-# -------------------------------------------------
-# Create venv if missing
-# -------------------------------------------------
 if [ ! -d "$VENV_DIR" ]; then
-    echo "[setup] No venv found — creating"
+    echo "[setup] Creating venv"
     python3 -m venv "$VENV_DIR"
 else
     echo "[setup] venv exists"
 fi
 
-# -------------------------------------------------
-# Activate venv
-# -------------------------------------------------
 source "$VENV_DIR/bin/activate"
 
-# -------------------------------------------------
-# Upgrade pip (never pin on HPC)
-# -------------------------------------------------
-echo "[setup] Upgrading pip"
 pip install --upgrade pip
 
 # -------------------------------------------------
-# Julia (required for stellar mode)
+# Julia verification (juliaup)
 # -------------------------------------------------
-if [[ "${OSPM_USE_JULIA}" == "1" ]]; then
-    echo "[setup] Julia required (OSPM_USE_JULIA=1)"
+JULIA_BIN="$HOME/.juliaup/bin/julia"
 
-    JULIA_VER="1.9.4"
-    JULIA_DIR="$HOME/julia-$JULIA_VER"
-
-    if ! command -v julia >/dev/null 2>&1; then
-        echo "[setup] Julia not found on PATH"
-
-        if [[ -n "${SLURM_JOB_ID:-}" || -n "${TACC_SYSTEM:-}" ]]; then
-            echo "[setup] HPC environment detected — installing user-local Julia"
-
-            JULIA_TAR="julia-$JULIA_VER-linux-x86_64.tar.gz"
-            JULIA_URL="https://julialang-s3.julialang.org/bin/linux/x64/1.9/$JULIA_TAR"
-
-            if [ ! -d "$JULIA_DIR" ]; then
-                cd "$HOME"
-                wget -q "$JULIA_URL"
-                tar -xzf "$JULIA_TAR"
-                rm -f "$JULIA_TAR"
-            fi
-        else
-            echo "[setup] ERROR: Julia required but not found"
-            exit 2
-        fi
-    fi
-
-    # Make Julia visible
-    export PATH="$JULIA_DIR/bin:$PATH"
-    export JULIA_DEPOT_PATH="$HOME/.julia"
-
-    # -------------------------------------------------
-    # Julia runtime warmup (scoped, safe)
-    # -------------------------------------------------
-    if command -v julia >/dev/null 2>&1; then
-        _LD_LIBRARY_PATH_SAVED="${LD_LIBRARY_PATH-}"
-        _LD_PRELOAD_SAVED="${LD_PRELOAD-}"
-
-        unset LD_LIBRARY_PATH
-        unset LD_PRELOAD
-
-        julia -e 'println("Julia runtime ready")'
-
-        export LD_LIBRARY_PATH="$_LD_LIBRARY_PATH_SAVED"
-        export LD_PRELOAD="$_LD_PRELOAD_SAVED"
-    fi
+if [ ! -x "$JULIA_BIN" ]; then
+    echo "[setup] ERROR: juliaup Julia not found"
+    echo "[setup] Install via: curl -fsSL https://install.julialang.org | sh"
+    exit 2
 fi
 
-# -------------------------------------------------
-# Install Python requirements if needed
-# -------------------------------------------------
-if [ ! -f "$REQ_FILE" ]; then
-    echo "[setup] ERROR: requirements file not found:"
-    echo "        $REQ_FILE"
-    exit 1
-fi
+export PATH="$HOME/.juliaup/bin:$PATH"
+export JULIA_DEPOT_PATH="$HOME/.julia"
 
-echo "[setup] Checking Python dependencies"
+echo "[setup] Julia version:"
+"$JULIA_BIN" --version
 
+echo "[setup] Warming up Julia runtime"
+unset LD_LIBRARY_PATH
+unset LD_PRELOAD
+"$JULIA_BIN" -e 'println("Julia runtime OK")'
+
+echo "[setup] Checking PyJulia"
 python - <<EOF
-import sys, subprocess
+from julia.api import Julia
+Julia(runtime="$JULIA_BIN", compiled_modules=False)
+print("[setup] PyJulia OK")
+EOF
 
-required = [
-    "numpy","scipy","pandas","matplotlib","astropy","torch"
-]
-
+# -------------------------------------------------
+# Python deps
+# -------------------------------------------------
+python - <<EOF
+import subprocess, sys
+required = ["numpy","scipy","pandas","matplotlib","astropy","torch"]
 missing = []
-for pkg in required:
-    try:
-        __import__(pkg)
-    except ImportError:
-        missing.append(pkg)
-
+for p in required:
+    try: __import__(p)
+    except ImportError: missing.append(p)
 if missing:
-    print("[setup] Installing:", missing)
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "$REQ_FILE"])
-else:
-    print("[setup] All required packages already installed")
+    subprocess.check_call([sys.executable,"-m","pip","install","-r","$REQ_FILE"])
 EOF
 
-# -------------------------------------------------
-# Final verification
-# -------------------------------------------------
-echo "[setup] Final verification"
-
-python - <<EOF
-import numpy, scipy, pandas, matplotlib, astropy, torch
-print("[setup] Environment ready")
-EOF
+echo "[setup] Environment ready"
