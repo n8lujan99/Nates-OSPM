@@ -21,7 +21,6 @@ fi
 export JULIA_DEPOT_PATH="$HOME/.julia"
 echo "[setup] Julia version:"
 "$JULIA_BIN" --version
-(unset LD_LIBRARY_PATH; unset LD_PRELOAD; "$JULIA_BIN" -e 'println("Julia runtime OK")')
 python3 - <<EOF || echo "[setup] PyJulia skipped"
 from julia.api import Julia
 import os
