@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then set -euo pipefail; fi
 
 export OSPM_USE_JULIA=1
 
@@ -8,48 +8,43 @@ VENV_DIR="$ROOT_DIR/.venv"
 REQ_FILE="$ROOT_DIR/utils/_Setup/requirements.txt"
 
 echo "[setup] OSPM root: $ROOT_DIR"
-
 command -v python3 >/dev/null 2>&1 || { echo "[setup] ERROR: python3 not found"; exit 1; }
-
-if [ ! -d "$VENV_DIR" ]; then
-    python3 -m venv "$VENV_DIR"
-fi
-
+[ -d "$VENV_DIR" ] || python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
-pip install --upgrade pip
-
+python3 -m pip install --upgrade pip
 if command -v julia >/dev/null 2>&1; then
-    JULIA_BIN="$(command -v julia)"
+  JULIA_BIN="$(command -v julia)"
 elif [ -x "$HOME/julia-1.10.10/bin/julia" ]; then
-    JULIA_BIN="$HOME/julia-1.10.10/bin/julia"
-    export PATH="$HOME/julia-1.10.10/bin:$PATH"
+  JULIA_BIN="$HOME/julia-1.10.10/bin/julia"
+  export PATH="$HOME/julia-1.10.10/bin:$PATH"
 else
-    echo "[setup] ERROR: Julia not found"
-    exit 2
+  echo "[setup] ERROR: julia not found"
+  exit 2
 fi
 
 export JULIA_DEPOT_PATH="$HOME/.julia"
-
+echo "[setup] Julia version:"
 "$JULIA_BIN" --version
-
-_LD_LIBRARY_PATH_SAVED="${LD_LIBRARY_PATH-}"
-_LD_PRELOAD_SAVED="${LD_PRELOAD-}"
-(
-    unset LD_LIBRARY_PATH
-    unset LD_PRELOAD
-    "$JULIA_BIN" -e 'println("Julia runtime OK")'
-)
-export LD_LIBRARY_PATH="$_LD_LIBRARY_PATH_SAVED"
-export LD_PRELOAD="$_LD_PRELOAD_SAVED"
+(unset LD_LIBRARY_PATH; unset LD_PRELOAD; "$JULIA_BIN" -e 'println("Julia runtime OK")')
 python3 - <<EOF || echo "[setup] PyJulia skipped"
 from julia.api import Julia
-Julia(runtime="$JULIA_BIN", compiled_modules=False)
-print("[setup] PyJulia OK")
+import os
+_ld=os.environ.pop("LD_LIBRARY_PATH",None)
+_lp=os.environ.pop("LD_PRELOAD",None)
+try:
+    Julia(runtime="$JULIA_BIN", compiled_modules=False)
+    print("[setup] PyJulia OK")
+finally:
+    if _ld is not None: os.environ["LD_LIBRARY_PATH"]=_ld
+    if _lp is not None: os.environ["LD_PRELOAD"]=_lp
 EOF
 python3 - <<EOF
 import subprocess, sys
-req = ["numpy","scipy","pandas","matplotlib","astropy","torch"]
-missing=[p for p in req if __import__(p,fromlist=["*"]) is None]
+required=["numpy","scipy","pandas","matplotlib","astropy","torch"]
+missing=[]
+for p in required:
+    try: __import__(p)
+    except ImportError: missing.append(p)
 if missing:
     subprocess.check_call([sys.executable,"-m","pip","install","-r","$REQ_FILE"])
 EOF

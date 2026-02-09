@@ -16,14 +16,26 @@ def _jl_init():
         return
     if not USE_JULIA:
         raise RuntimeError("OSPM_USE_JULIA is not enabled")
+    julia_exe = os.environ.get("OSPM_JULIA_EXE","").strip()
+    if not julia_exe:
+        julia_exe = os.environ.get("JULIA_EXE","").strip()
+    if not julia_exe:
+        julia_exe = os.path.join(os.path.expanduser("~"), "julia-1.10.10", "bin", "julia")
+        if not os.path.exists(julia_exe):
+            julia_exe = "julia"
     from julia.api import Julia
-    import shutil, os
-    julia_exe = os.environ.get("JULIA_RUNTIME")
-    if julia_exe is None:
-        julia_exe = shutil.which("julia")
-    if julia_exe is None:
-        raise FileNotFoundError("Julia executable not found on PATH")
-    Julia(runtime=julia_exe, compiled_modules=False)
+    _ld = os.environ.pop("LD_LIBRARY_PATH", None)
+    _lp = os.environ.pop("LD_PRELOAD", None)
+    _jd = os.environ.get("JULIA_DEPOT_PATH", "")
+    if not _jd:
+        os.environ["JULIA_DEPOT_PATH"] = os.path.join(os.path.expanduser("~"), ".julia")
+    try:
+        Julia(runtime=julia_exe, compiled_modules=False)
+    finally:
+        if _ld is not None:
+            os.environ["LD_LIBRARY_PATH"] = _ld
+        if _lp is not None:
+            os.environ["LD_PRELOAD"] = _lp
     from julia import Main as _JuliaMain
     _Main = _JuliaMain
     here = os.path.dirname(os.path.abspath(__file__))
@@ -32,6 +44,8 @@ def _jl_init():
         raise FileNotFoundError(f"Julia backend file not found: {jl_path}")
     if not hasattr(_Main, "OSPMPhysicsSpherical"):
         _Main.include(jl_path)
+    if not hasattr(_Main, "OSPMPhysicsSpherical"):
+        raise RuntimeError("OSPMPhysicsSpherical failed to load into Main")
     _JL_READY = True
 
 def _theta_sig(theta,halo_type):
