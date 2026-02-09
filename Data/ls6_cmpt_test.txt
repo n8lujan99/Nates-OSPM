@@ -1,0 +1,4 @@
+#!compute test 
+idev -N 1 -n 1 -t 00:30:00
+cd /scratch/09909/n8lujan99/Nates-OSPM
+bash utils/ls6start
