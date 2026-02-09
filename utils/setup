@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then set -euo pipefail; fi
 export OSPM_USE_JULIA=1
+export JULIA_DEPOT_PATH=/scratch/09909/n8lujan99/.julia
+export JULIA_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export OMP_NUM_THREADS=1
+unset LD_LIBRARY_PATH
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$ROOT_DIR/.venv"
 REQ_FILE="$ROOT_DIR/utils/_Setup/requirements.txt"
