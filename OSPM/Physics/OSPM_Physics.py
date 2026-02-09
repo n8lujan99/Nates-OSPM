@@ -30,7 +30,7 @@ def _jl_init():
     if not _jd:
         os.environ["JULIA_DEPOT_PATH"] = os.path.join(os.path.expanduser("~"), ".julia")
     try:
-        Julia(runtime=julia_exe, compiled_modules=False,python=None)
+        Julia(runtime=julia_exe, compiled_modules=False) #python=None)
     finally:
         if _ld is not None:
             os.environ["LD_LIBRARY_PATH"] = _ld
