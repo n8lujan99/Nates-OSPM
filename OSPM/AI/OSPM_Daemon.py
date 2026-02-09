@@ -112,7 +112,6 @@ class Deck:
 # accepted; all failures are hard rejections.
 
 class Corpo:
-    def __init__(self, engine): self.engine=engine
     def eval(self, theta):
         try:
             chi2=float(self.engine(theta))
@@ -120,7 +119,8 @@ class Corpo:
             return "pass",chi2
         except FloatingPointError: return "numeric_fail",np.inf
         except RuntimeError:       return "orbit_fail",np.inf
-        except Exception:          return "unknown_fail",np.inf
+        except Exception:          raise 
+
 
 # ============================================================
 # AI helpers

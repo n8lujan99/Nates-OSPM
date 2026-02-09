@@ -4,14 +4,18 @@ from .OSPM_MASTER import build_observables, solve_ospm_theta
 from .OSPM_API import OSPM_API
 from ..Physics.OSPM_PhysicsEngine import wrap_physics_engine
 
+def build_physics_engine(config):
+    obs = build_observables(config)
+    def base_engine(theta):
+        chi2, _, _ = solve_ospm_theta(theta, obs, 
+                    halo_type=config["HALO_TYPE"])
+        return float(chi2)
+    return wrap_physics_engine( base_engine, obs=obs,
+         halo_type=config["HALO_TYPE"], config=config)
 def main():
     config = load_config()
     runtime = build_runtime(config)
-    obs = build_observables(config)
-    def base_engine(theta):
-        chi2, _, _ = solve_ospm_theta( theta, obs, halo_type=config["HALO_TYPE"])
-        return float(chi2)
-    physics_engine = wrap_physics_engine( base_engine, obs=obs, halo_type=config["HALO_TYPE"], config=config)
+    physics_engine = build_physics_engine(config)
     api = OSPM_API(runtime)
     api.set_physics_engine(physics_engine)
     result = api.run()
