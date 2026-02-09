@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -e
+export OSPM_USE_JULIA=1
 
 # -------------------------------------------------
 # Paths
@@ -98,17 +99,26 @@ if [[ "${OSPM_USE_JULIA:-0}" == "1" ]]; then
     export JULIA_DEPOT_PATH="$HOME/.julia"
 
     echo "[setup] Warming up Julia runtime"
+    unset LD_LIBRARY_PATH
+    unset LD_PRELOAD
     julia -e 'println("Julia first-run OK")'
 
     # <<< END ADDITION <<<
 
     # Verify PyJulia can initialize
+    echo "[setup] Warming up Julia runtime"
+    unset LD_LIBRARY_PATH
+    unset LD_PRELOAD
+    julia -e 'println("Julia first-run OK")'
+
+    echo "[setup] Checking PyJulia"
+    unset LD_LIBRARY_PATH
+    unset LD_PRELOAD
     python - <<EOF
-from julia.api import Julia
-Julia(compiled_modules=False)
-print("[setup] PyJulia initialized successfully")
-EOF
-fi
+    from julia.api import Julia
+    Julia(compiled_modules=False)
+    print("[setup] PyJulia initialized successfully")
+    EOF
 
 
 # -------------------------------------------------

@@ -17,28 +17,37 @@ def _jl_init():
 
     if not USE_JULIA:
         raise RuntimeError("OSPM_USE_JULIA is not enabled")
+    import shutil, subprocess
+
+    julia_exe = os.path.join(os.path.expanduser("~"), "julia-1.9.4", "bin", "julia")
+    if not os.path.exists(julia_exe):
+        raise FileNotFoundError(f"Julia runtime not found at: {julia_exe}")
+
+    # quick sanity: make sure julia can start in this environment
+    try:
+        subprocess.check_output([julia_exe, "-e", "println(VERSION)"])
+    except Exception as e:
+        raise RuntimeError(
+            "Julia runtime failed to start. "
+            "On LS6 this is usually LD_LIBRARY_PATH/LD_PRELOAD contamination. "
+            "Fix in utils/start by unsetting those before running Python."
+        ) from e
 
     from julia.api import Julia
-    Julia(compiled_modules=False)
-
+    Julia(
+        runtime=os.path.join(os.path.expanduser("~"), "julia-1.9.4", "bin", "julia"), compiled_modules=False)
     from julia import Main as _JuliaMain
     _Main = _JuliaMain
-
     here = os.path.dirname(os.path.abspath(__file__))
     jl_path = os.path.join(here, "OSPM_Physics_Spherical.jl")
     if not os.path.exists(jl_path):
         raise FileNotFoundError(f"Julia backend file not found: {jl_path}")
-
     # include only once per Julia session
     if not hasattr(_Main, "OSPMPhysicsSpherical"):
         _Main.include(jl_path)
-
     if not hasattr(_Main, "OSPMPhysicsSpherical"):
         raise RuntimeError("OSPMPhysicsSpherical failed to load into Main")
-
     _JL_READY = True
-
-
 
 def _theta_sig(theta,halo_type):
     t=np.asarray(theta,float).ravel()
@@ -109,17 +118,9 @@ def build_A_matrix_stellar_julia(*,R_star_m,v_star_mps,verr_star_mps,sini,Norbit
     rho_s,r_s,MBH,ht=assert_theta_contract(theta,halo_type=halo_type,require_mbh=True)
     maybe_reset_orbit_cache((rho_s,r_s,MBH),ht)
     out=_Main.OSPMPhysicsSpherical.build_A_matrix_stellar(
-        int(Norbit),
-        np.asarray(R_star_m,float),
-        np.asarray(v_star_mps,float),
-        np.asarray(verr_star_mps,float),
-        float(sini),
-        float(rho_s),float(r_s),float(MBH),
-        str(ht),
-        return_occ=bool(return_occ),
-        Nbins_occ=int(Nbins_occ),
-        diag=bool(diag),
-    )
+        int(Norbit), np.asarray(R_star_m,float), np.asarray(v_star_mps,float),
+        np.asarray(verr_star_mps, float),float(sini), float(rho_s),float(r_s),float(MBH),
+        str(ht),return_occ=bool(return_occ), Nbins_occ=int(Nbins_occ), diag=bool(diag))
     if diag:
         A,meta=out
         return np.asarray(A,float), dict(meta)
@@ -131,25 +132,18 @@ def build_A_matrix(obs,ctx,*,return_occ=False,Nbins_occ=6,diag=False):
     hk=halo_kwargs_from_ctx(ctx)
     theta=[hk["rho_s"],hk["r_s"],hk["MBH"]]
     halo_type=hk["halo_type"]
-
     vv=np.asarray(getattr(obs,"valid_vlos",None),bool) if hasattr(obs,"valid_vlos") else None
     if vv is None:
         has=np.asarray(getattr(obs,"has_vlos",None),bool) if hasattr(obs,"has_vlos") else None
         if has is None: raise RuntimeError("obs missing valid_vlos (or has_vlos)")
         vv=has & np.isfinite(obs.v_star_mps) & np.isfinite(obs.verr_star_mps) & (np.asarray(obs.verr_star_mps,float)>0)
-
     R=np.asarray(obs.R_star_m,float)[vv]
     v=np.asarray(obs.v_star_mps,float)[vv]
     ve=np.asarray(obs.verr_star_mps,float)[vv]
     if len(R)==0: raise RuntimeError("No RV-valid stars to build A-matrix")
-
-    return build_A_matrix_stellar_julia(
-        R_star_m=R,v_star_mps=v,verr_star_mps=ve,
-        sini=float(obs.sini),Norbit=int(obs.Norbit),
-        theta=theta,halo_type=halo_type,
-        return_occ=bool(return_occ),Nbins_occ=int(Nbins_occ),
-        diag=bool(diag),
-    )
+    return build_A_matrix_stellar_julia( R_star_m=R,v_star_mps=v,verr_star_mps=ve,
+        sini=float(obs.sini),Norbit=int(obs.Norbit), theta=theta,halo_type=halo_type,
+        return_occ=bool(return_occ),Nbins_occ=int(Nbins_occ), diag=bool(diag), )
 
 def build_A_matrix_from_theta(obs,theta,*,halo_type="nfw",return_occ=True,Nbins_occ=6,diag=False):
     ctx=build_dynamics_context(theta=theta,halo_type=halo_type)

@@ -20,6 +20,12 @@ if [ -d "$JULIA_DIR/bin" ]; then
     export JULIA_DEPOT_PATH="$HOME/.julia"
 fi
 # -------------------------------------------------
+# HPC linker detox (Julia must use its own libs)
+# -------------------------------------------------
+unset LD_LIBRARY_PATH
+unset LD_PRELOAD
+
+# -------------------------------------------------
 # Julia runtime warmup (required on HPC)
 # -------------------------------------------------
 if command -v julia >/dev/null 2>&1; then
