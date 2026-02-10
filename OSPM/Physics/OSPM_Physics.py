@@ -37,42 +37,9 @@ def _jl_init():
         if not os.path.exists(julia_exe):
             julia_exe = "julia"
 
-    from julia.api import Julia
+    from juliacall import Main as _Main
 
-    _ld = os.environ.get("LD_LIBRARY_PATH")
-    _lp = os.environ.get("LD_PRELOAD")
-
-    _jd = os.environ.get("JULIA_DEPOT_PATH", "")
-    if not _jd:
-        os.environ["JULIA_DEPOT_PATH"] = os.path.join(os.path.expanduser("~"), ".julia")
-
-    gcc_lib = _gcc_libstdcpp_dir()
-
-    try:
-        # Keep ONLY libstdc++ for Julia (fixes GLIBCXX without PCRE poison)
-        if gcc_lib:
-            os.environ["LD_LIBRARY_PATH"] = gcc_lib
-        else:
-            os.environ.pop("LD_LIBRARY_PATH", None)
-
-        os.environ.pop("LD_PRELOAD", None)
-
-        Julia(runtime=julia_exe, compiled_modules=False)
-
-    finally:
-        if _ld is not None:
-            os.environ["LD_LIBRARY_PATH"] = _ld
-        else:
-            os.environ.pop("LD_LIBRARY_PATH", None)
-
-        if _lp is not None:
-            os.environ["LD_PRELOAD"] = _lp
-        else:
-            os.environ.pop("LD_PRELOAD", None)
-
-    from julia import Main as _JuliaMain
-    _Main = _JuliaMain
-
+    _Main.include(jl_path)
     here = os.path.dirname(os.path.abspath(__file__))
     jl_path = os.path.join(here, "OSPM_Physics_Spherical.jl")
     if not os.path.exists(jl_path):

@@ -13,18 +13,15 @@
 #SBATCH -c 8
 
 set -euo pipefail
-
 module purge
 module load python/3.12.11
 module load gcc/12.2.0
 export JULIA_BINDIR=/scratch/09909/n8lujan99/julia-1.10.10/bin
 export PATH="$JULIA_BINDIR:$PATH"
-
 export JULIA_DEPOT_PATH=/scratch/09909/n8lujan99/.julia
 export JULIA_PKG_SERVER=""
 unset LD_LIBRARY_PATH
 unset LD_PRELOAD
-
 export JULIA_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 
 if [[ -z "${OSPM_REPO_ROOT:-}" ]]; then
@@ -50,14 +47,11 @@ fi
 echo "[INFO] Galaxy: $GALAXY"
 echo "[INFO] Repo root: $REPO_ROOT"
 echo "[INFO] CPUs: ${SLURM_CPUS_PER_TASK}"
-
 cd "$REPO_ROOT"
 
 # DO NOT CALL setup IN SLURM
 source .venv/bin/activate
-
 export PYJULIA_USE_PYTHONCALL=1
 export OSPM_USE_JULIA=1
 export PYTHONPATH="$REPO_ROOT"
-
 bash utils/start
