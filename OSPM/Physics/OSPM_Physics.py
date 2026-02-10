@@ -28,30 +28,20 @@ def _jl_init():
         return
     if not USE_JULIA:
         raise RuntimeError("OSPM_USE_JULIA is not enabled")
-
-    julia_exe = os.environ.get("OSPM_JULIA_EXE","").strip()
-    if not julia_exe:
-        julia_exe = os.environ.get("JULIA_EXE","").strip()
-    if not julia_exe:
-        julia_exe = os.path.join(os.path.expanduser("~"), "julia-1.10.10", "bin", "julia")
-        if not os.path.exists(julia_exe):
-            julia_exe = "julia"
-
+    # juliacall handles Julia discovery itself
     from juliacall import Main as _Main
-
-    _Main.include(jl_path)
+    # locate Julia backend file
     here = os.path.dirname(os.path.abspath(__file__))
     jl_path = os.path.join(here, "OSPM_Physics_Spherical.jl")
     if not os.path.exists(jl_path):
         raise FileNotFoundError(f"Julia backend file not found: {jl_path}")
-
+    # load backend once
     if not hasattr(_Main, "OSPMPhysicsSpherical"):
         _Main.include(jl_path)
-
     if not hasattr(_Main, "OSPMPhysicsSpherical"):
         raise RuntimeError("OSPMPhysicsSpherical failed to load into Main")
-
     _JL_READY = True
+
 
 
 def _theta_sig(theta,halo_type):

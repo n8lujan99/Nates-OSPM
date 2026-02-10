@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 module purge
 module load python/3.12.11
 module load gcc/12.2.0
+
+# ---- Julia must be configured BEFORE python ----
 export JULIA_BINDIR=/scratch/09909/n8lujan99/julia-1.10.10/bin
 export PATH="$JULIA_BINDIR:$PATH"
+
 export JULIA_DEPOT_PATH=/scratch/09909/n8lujan99/.julia
 export JULIA_PKG_SERVER=""
 unset LD_LIBRARY_PATH
 unset LD_PRELOAD
+
+# ---- now Python is allowed to exist ----
 source .venv/bin/activate
+
 which python
 python --version
 which julia
 julia --version
+
 bash utils/start
