@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+exec env -u LD_LIBRARY_PATH /scratch/09909/n8lujan99/julia-1.10.10/bin/julia "$@"
+chmod +x utils/julia_clean.sh
+export PYTHON_JULIACALL_EXE="/scratch/09909/n8lujan99/Nates-OSPM/utils/julia_clean.sh"

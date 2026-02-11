@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+# /usr/bin/env bash
+# !legacy / local PyJulia setup — DO NOT USE ON TACC
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then set -euo pipefail; fi
 
 # ---- identity ----

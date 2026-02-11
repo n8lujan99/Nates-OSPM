@@ -1,7 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-
-export JULIA_DEPOT_PATH="/scratch/09909/n8lujan99/.julia" 
+export JULIA_DEPOT_PATH="/scratch/09909/n8lujan99/.julia"
 export JULIA_PKG_SERVER=""
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WHICH_GAL_FILE="$REPO_ROOT/which_galaxy"
