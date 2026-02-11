@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+LOG="/scratch/09909/n8lujan99/Nates-OSPM/logs/juliacall_exe.log"
+mkdir -p "$(dirname "$LOG")"
+{
+  echo "=== juliacall wrapper hit ==="
+  date
+  echo "ARGV: $*"
+  echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH-<unset>}"
+  echo "LD_PRELOAD: ${LD_PRELOAD-<unset>}"
+  echo "LIBRARY_PATH: ${LIBRARY_PATH-<unset>}"
+  echo "CPATH: ${CPATH-<unset>}"
+} >> "$LOG"
 unset LD_LIBRARY_PATH
 unset LD_PRELOAD
 unset LIBRARY_PATH
