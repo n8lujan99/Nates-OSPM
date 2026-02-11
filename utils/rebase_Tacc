@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -e
+
+HOST=$(hostname -f 2>/dev/null || hostname)
+
+# ------------------------------------------------------------
+# Verify TACC environment
+# ------------------------------------------------------------
+
+if [[ "$HOST" != *"tacc.utexas.edu"* && "$HOST" != *"ls6"* ]]; then
+    echo "---------------------------------------"
+    echo "You are NOT on TACC."
+    echo "Hostname detected: $HOST"
+    echo "You are not where you think you are, silly."
+    echo "Rebase aborted."
+    echo "---------------------------------------"
+    exit 1
+fi
+
+echo "---------------------------------------"
+echo "TACC detected: $HOST"
+echo "Repository: $(basename "$(git rev-parse --show-toplevel)")"
+echo "Branch: $(git branch --show-current)"
+echo "Upstream: $(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo 'None')"
+echo "---------------------------------------"
+
+read -p "Proceed with rebase onto origin/main? (yes/no): " confirm
+
+if [[ "$confirm" != "yes" ]]; then
+    echo "Rebase cancelled."
+    exit 0
+fi
+
+git fetch origin
+git rebase origin/main
+
+echo "---------------------------------------"
+echo "Rebase complete."
+echo "---------------------------------------"
