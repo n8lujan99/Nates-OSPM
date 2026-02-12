@@ -119,10 +119,15 @@ class Corpo:
             chi2=float(self.engine(theta))
             if not np.isfinite(chi2): return "numeric_fail",np.inf
             return "pass",chi2
-        except FloatingPointError: return "numeric_fail",np.inf
-        except RuntimeError:       return "orbit_fail",np.inf
-        except Exception:          raise 
-
+        except FloatingPointError:
+            return "numeric_fail",np.inf
+        except RuntimeError as e:
+            import traceback
+            print("[Corpo] RuntimeError:", repr(e))
+            traceback.print_exc()
+            raise
+        except Exception:
+            raise
 
 # ============================================================
 # AI helpers
