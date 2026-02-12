@@ -11,24 +11,43 @@
 #SBATCH --mem=32G
 
 set -euo pipefail
+
 module purge
 module load python/3.12.11
 module load gcc/12.2.0
+
+# ---- Julia configuration ----
 export JULIA_BINDIR=/scratch/09909/n8lujan99/julia-1.10.10/bin
+export JULIA_LIBDIR=/scratch/09909/n8lujan99/julia-1.10.10/lib/julia
 export PATH="$JULIA_BINDIR:$PATH"
-export JULIA_DEPOT_PATH=/scratch/09909/n8lujan99/.julia
+
+# Make Julia's bundled libs win over system libs
+export LD_LIBRARY_PATH="$JULIA_LIBDIR:${LD_LIBRARY_PATH:-}"
+
+# Use clean depot in scratch
+export JULIA_DEPOT_PATH="$SCRATCH/.julia_clean"
 export JULIA_PKG_SERVER=""
 export JULIA_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
+
+# PythonCall bridge
+export PYTHON_JULIACALL_EXE="$JULIA_BINDIR/julia"
+export PYTHON_JULIACALL_PROJECT="$OSPM_REPO_ROOT/.venv/julia_env"
+# ------------------------------
+
 if [[ -z "${OSPM_REPO_ROOT:-}" ]]; then
     echo "[FATAL] OSPM_REPO_ROOT not set"
     exit 1
 fi
+
 REPO_ROOT="$OSPM_REPO_ROOT"
 cd "$REPO_ROOT"
+
 source .venv/bin/activate
+
 echo "[SLURM] Host: $(hostname)"
 echo "[SLURM] Julia: $(julia --version)"
 echo "[SLURM] Python: $(python --version)"
 echo "[SLURM] Threads: ${JULIA_NUM_THREADS}"
 echo "[SLURM] Repo: $REPO_ROOT"
+
 bash utils/start
