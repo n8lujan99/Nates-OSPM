@@ -46,4 +46,6 @@ python --version
 # ---- ENVIRONMENT DIAGNOSTIC ----
 
 "$JULIA_BIN" --project="$ROOT/.venv/julia_env" -e 'using PythonCall; println("[START] Julia + PythonCall OK")'
+# ---- Run it ----
 
+python -m OSPM.Controllers.OSPM_RUN
