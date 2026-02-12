@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+echo "[DEBUG] Running start from: $(readlink -f "$0")"
+
 # Resolve repo root and galaxy
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WHICH_FILE="$ROOT/which_galaxy"
@@ -12,14 +14,17 @@ if [[ -z "$GALAXY" ]]; then
   echo "[START] ERROR: which_galaxy is empty"
   exit 1
 fi
+
 echo "[START] Repo root: $ROOT"
 echo "[START] Galaxy: $GALAXY"
+
 # ------------------------------------------------------------
-# Project switches (project-owned, not cluster-owned)
+# Project switches
 # ------------------------------------------------------------
 export OSPM_USE_JULIA=1
 export PYJULIA_USE_PYTHONCALL=1
 export PYTHONPATH="$ROOT"
+
 # ------------------------------------------------------------
 # Julia discovery
 # ------------------------------------------------------------
@@ -31,15 +36,23 @@ else
   echo "[START] ERROR: Julia not found"
   exit 2
 fi
+
 export OSPM_JULIA_EXE="$JULIA_BIN"
+
 echo "[START] Julia executable: $OSPM_JULIA_EXE"
 echo "[START] Python executable: $(which python)"
 python --version
-# ---- CRITICAL FIX: scrub loader only for Julia ----
-env -u LD_LIBRARY_PATH "$JULIA_BIN" -e 'using PythonCall; println("[START] Julia + PythonCall OK")'
-# Optional Python-side confirmation
-python - <<'PY'
-from OSPM.Physics import OSPM_Physics as P
-print("[CHECK] USE_JULIA:", P.USE_JULIA)
-PY
-python -m OSPM.Controllers.OSPM_RUN
+
+# ---- ENVIRONMENT DIAGNOSTIC ----
+"$JULIA_BIN" --project="$ROOT/.venv/julia_env" -e '
+using Pkg
+println("==== JULIA ENV DEBUG ====")
+println("Active project: ", Base.active_project())
+println("LOAD_PATH: ", LOAD_PATH)
+println("DEPOT_PATH: ", DEPOT_PATH)
+println("Status:")
+Pkg.status()
+println("==========================")
+'
+
+exit 0
