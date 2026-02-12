@@ -44,15 +44,6 @@ echo "[START] Python executable: $(which python)"
 python --version
 
 # ---- ENVIRONMENT DIAGNOSTIC ----
-"$JULIA_BIN" --project="$ROOT/.venv/julia_env" -e '
-using Pkg
-println("==== JULIA ENV DEBUG ====")
-println("Active project: ", Base.active_project())
-println("LOAD_PATH: ", LOAD_PATH)
-println("DEPOT_PATH: ", DEPOT_PATH)
-println("Status:")
-Pkg.status()
-println("==========================")
-'
 
-exit 0
+"$JULIA_BIN" --project="$ROOT/.venv/julia_env" -e 'using PythonCall; println("[START] Julia + PythonCall OK")'
+
