@@ -1,24 +1,25 @@
 # OSPM/Physics/OSPM_Physics.py
 # contract + cache authority + diagnostics hooks (compressed)
-
 import os, numpy as np
 import sys
-
 # --- PythonCall / JuliaCall must see these BEFORE importing juliacall ---
 os.environ["PYTHON"] = sys.executable
-
 # repo root owns Project.toml / Manifest.toml
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-# force Julia to use THIS project (prevents juliacall from making .venv/julia_env)
-# do not overwrite if user explicitly set it upstream
-os.environ.setdefault("JULIA_PROJECT", _REPO_ROOT)
-
+# ---- Force JuliaCall to use repo project deterministically ----
+# JULIA_PROJECT is ignored by juliacall. Use PYTHON_JULIACALL_* instead.
+os.environ.setdefault("PYTHON_JULIACALL_PROJECT", _REPO_ROOT)
+os.environ.setdefault("PYTHON_JULIACALL_EXE", os.path.expanduser("~/.juliaup/bin/julia"))
+# ---- Embedded stability ----
+os.environ.setdefault("PYTHON_JULIACALL_HANDLE_SIGNALS", "yes")
+os.environ.setdefault("JULIA_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 USE_JULIA = os.environ.get("OSPM_USE_JULIA", "0").strip().lower() in ("1", "true", "yes")
 _JL_READY = False
 _Main = None
 print("[PY] OSPM_Physics imported from:", __file__)
-
+################################################################################################################
 pc = 3.085677581e16
 kms = 1.0e3
 Msun = 1.98847e30

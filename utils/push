@@ -13,7 +13,7 @@ set -euo pipefail
 # ----------------------------
 # Identity guard
 # ----------------------------
-ALLOWED_USER="n8lujan99"
+ALLOWED_USER="nate"
 
 if [[ "$(whoami)" != "$ALLOWED_USER" ]]; then
     echo "[push] Refusing: user $(whoami) is not allowed to push."

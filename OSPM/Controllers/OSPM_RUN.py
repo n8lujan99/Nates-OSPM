@@ -20,7 +20,8 @@ def main():
     # force Julia init BEFORE torch gets imported (API -> Daemon -> torch)
     from ..Physics import OSPM_Physics as P
     P._jl_init()
-
+    from juliacall import Main
+    print("Julia threads seen by module:", Main.OSPMPhysicsSpherical.NTHREADS)
     from .OSPM_API import OSPM_API
     api = OSPM_API(runtime)
     api.set_physics_engine(physics_engine)
