@@ -1,24 +1,32 @@
 from __future__ import annotations
 
+import time
 import numpy as np
 from scipy.optimize import minimize
 
 from ..Physics.OSPM_Physics import build_A_matrix_stellar_julia
 from ..Physics.OSPM_PhysicsEngine import (
     chi2_resolution_penalty,
-    mass_slope_penalty
+    mass_slope_penalty,
 )
-
 
 # -----------------------------------------------------------
 # Utilities
 # -----------------------------------------------------------
 
-def _as_1d_float(x, name):
+def _as_1d_float(x, name: str) -> np.ndarray:
     a = np.asarray(x, float).reshape(-1)
     if a.size == 0 or not np.all(np.isfinite(a)):
         raise ValueError(f"{name} invalid")
     return a
+
+
+def _safe_float(x, default=np.inf) -> float:
+    try:
+        y = float(x)
+        return y if np.isfinite(y) else float(default)
+    except Exception:
+        return float(default)
 
 
 # -----------------------------------------------------------
@@ -31,12 +39,12 @@ def stellar_log_likelihood(
     *,
     verr_star_mps,
     rv_mask,
-    Nstar,
-    Nocc,
-    lambda_occ=1.0,
-    eps=1e-300,
-    sigma_floor_mps=2e3
-):
+    Nstar: int,
+    Nocc: int,
+    lambda_occ: float = 1.0,
+    eps: float = 1e-300,
+    sigma_floor_mps: float = 2e3,
+) -> float:
     A = np.asarray(A, float)
     w = _as_1d_float(w, "w")
 
@@ -44,7 +52,6 @@ def stellar_log_likelihood(
         raise ValueError("A shape mismatch")
 
     p = np.maximum(A @ w, eps)
-
     ll = 0.0
 
     # Velocity likelihood
@@ -62,11 +69,11 @@ def stellar_log_likelihood(
     if Nocc > 0:
         ll += float(lambda_occ) * float(np.sum(np.log(np.maximum(p[Nstar:], eps))))
 
-    return ll
+    return float(ll)
 
 
 # -----------------------------------------------------------
-# Weight Solver (robust)
+# Weight Solver
 # -----------------------------------------------------------
 
 def solve_weights_stellar(
@@ -74,34 +81,49 @@ def solve_weights_stellar(
     *,
     verr_star_mps,
     rv_mask,
-    Nstar,
-    Nocc,
-    lambda_occ=1.0,
-    alpha=1e-3,
-    eps=1e-300,
-    maxiter=500,
-    maxfun=20000,
-    p0_floor=1e-15
+    Nstar: int,
+    Nocc: int,
+    lambda_occ: float = 1.0,
+    alpha: float = 1e-3,
+    eps: float = 1e-300,
+    maxiter: int = 500,
+    maxfun: int = 20000,
+    p0_floor: float = 1e-15,
+    seed: int | None = None,
 ):
+    """
+    Returns (w_normed, meta) on success, (None, meta) on failure.
+    meta includes solver status and timing.
+    """
+    t0 = time.perf_counter()
+
     A = np.asarray(A, float)
+    if A.ndim != 2 or A.shape[0] != Nstar + Nocc:
+        return None, {"ok": False, "reason": "A_shape", "t_solve": 0.0}
+
     Norbit = A.shape[1]
+    if Norbit <= 0:
+        return None, {"ok": False, "reason": "Norb0", "t_solve": 0.0}
 
     # Scale regularization with problem size
-    alpha *= Norbit / 200.0 * max(Nstar, 1) / 90.0
+    alpha_eff = float(alpha) * (Norbit / 200.0) * (max(Nstar, 1) / 90.0)
 
-    # Initial guess
-    w0 = np.random.rand(Norbit) + 1e-3
-    w0 /= w0.sum()
+    rng = np.random.default_rng(seed)
+    w0 = rng.random(Norbit) + 1e-3
+    w0 = w0 / w0.sum()
 
     rv_mask = np.asarray(rv_mask, bool)
-    active = (
-        np.concatenate([rv_mask, np.ones(Nocc, bool)])
-        if Nocc > 0 else rv_mask
-    )
+    if rv_mask.size != Nstar:
+        return None, {"ok": False, "reason": "rv_mask_mismatch", "t_solve": 0.0}
+
+    active = np.concatenate([rv_mask, np.ones(Nocc, bool)]) if Nocc > 0 else rv_mask
 
     # Rescale active rows to avoid catastrophic scaling
     p0 = A @ w0
-    scale = 1.0 / np.maximum(p0[active], p0_floor)
+    if active.any():
+        scale = 1.0 / np.maximum(p0[active], p0_floor)
+    else:
+        scale = None
 
     Aeff = A.copy()
     if active.any():
@@ -118,71 +140,131 @@ def solve_weights_stellar(
             Nstar=Nstar,
             Nocc=Nocc,
             lambda_occ=lambda_occ,
-            eps=eps
+            eps=eps,
         )
-        return -ll + alpha * np.dot(w, w)
+        return -ll + alpha_eff * float(np.dot(w, w))
 
+    # Try L-BFGS-B first
     try:
-        # First attempt
         res = minimize(
             obj,
             w0,
             method="L-BFGS-B",
             bounds=bounds,
-            options={"maxiter": maxiter, "maxfun": maxfun}
+            options={"maxiter": int(maxiter), "maxfun": int(maxfun)},
         )
+        method = "L-BFGS-B"
+    except Exception as e:
+        t1 = time.perf_counter()
+        return None, {"ok": False, "reason": f"lbfgsb_exc:{type(e).__name__}", "t_solve": t1 - t0}
 
-        # Fallback attempt
-        if not res.success:
-            res = minimize(
+    # Fallback: SLSQP
+    if not getattr(res, "success", False):
+        try:
+            res2 = minimize(
                 obj,
                 w0,
                 method="SLSQP",
                 bounds=bounds,
-                options={"maxiter": 3 * maxiter, "ftol": 1e-9}
+                options={"maxiter": int(3 * maxiter), "ftol": 1e-9},
             )
+            if getattr(res2, "success", False):
+                res = res2
+                method = "SLSQP"
+        except Exception as e:
+            t1 = time.perf_counter()
+            return None, {
+                "ok": False,
+                "reason": f"slsqp_exc:{type(e).__name__}",
+                "t_solve": t1 - t0,
+                "method": "SLSQP",
+            }
 
-        if not res.success:
-            return None
+    t1 = time.perf_counter()
 
-        w = np.maximum(res.x, 0.0)
-        s = w.sum()
+    if not getattr(res, "success", False):
+        msg = getattr(res, "message", "fail")
+        return None, {
+            "ok": False,
+            "reason": f"no_converge:{msg}",
+            "t_solve": t1 - t0,
+            "method": method,
+            "nit": int(getattr(res, "nit", -1)),
+            "nfev": int(getattr(res, "nfev", -1)),
+        }
 
-        if not np.isfinite(s) or s <= 0:
-            return None
+    w = np.maximum(np.asarray(res.x, float), 0.0)
+    s = float(w.sum())
+    if not np.isfinite(s) or s <= 0.0:
+        return None, {
+            "ok": False,
+            "reason": "bad_sum",
+            "t_solve": t1 - t0,
+            "method": method,
+        }
 
-        return w / s
-
-    except Exception:
-        return None
+    return (w / s), {
+        "ok": True,
+        "t_solve": t1 - t0,
+        "method": method,
+        "nit": int(getattr(res, "nit", -1)),
+        "nfev": int(getattr(res, "nfev", -1)),
+    }
 
 
 # -----------------------------------------------------------
 # Theta Solve
 # -----------------------------------------------------------
 
-def solve_ospm_theta_stellar(theta, obs, *, halo_type="nfw"):
+def solve_ospm_theta_stellar(theta, obs, *, halo_type: str = "nfw", diag: bool = False):
+    """
+    Returns:
+      - chi2_red (float)
+      - w (np.ndarray | None)
+      - model (np.ndarray | None)  # A@w
+    If diag=True, returns a 4th item: meta dict with timings and failure stage.
+    """
 
-    rho_s, r_s, MBH = map(float, theta)
+    meta = {"ok": False, "stage": None}
 
-    R  = np.asarray(obs.R_star_m, float)
-    v  = np.asarray(obs.v_star_mps, float)
+    t_all0 = time.perf_counter()
+
+    try:
+        rho_s, r_s, MBH = map(float, theta)
+    except Exception:
+        out = (float(np.inf), None, None)
+        if diag:
+            meta |= {"stage": "theta_parse", "t_total": time.perf_counter() - t_all0}
+            return (*out, meta)
+        return out
+
+    R = np.asarray(obs.R_star_m, float)
+    v = np.asarray(obs.v_star_mps, float)
     ve = np.asarray(obs.verr_star_mps, float)
 
     if R.size == 0 or not np.all(np.isfinite(R)):
-        return float(np.inf), None, None
+        out = (float(np.inf), None, None)
+        if diag:
+            meta |= {"stage": "obs_R", "t_total": time.perf_counter() - t_all0}
+            return (*out, meta)
+        return out
 
     rv = np.asarray(obs.valid_vlos, bool)
     if rv.size != R.size:
-        return float(np.inf), None, None
+        out = (float(np.inf), None, None)
+        if diag:
+            meta |= {"stage": "obs_rv_mask", "t_total": time.perf_counter() - t_all0}
+            return (*out, meta)
+        return out
 
     Norbit = int(obs.Norbit)
-    sini   = float(obs.sini)
+    sini = float(obs.sini)
 
-    Nocc       = int(getattr(obs, "Nocc", 0))
+    Nocc = int(getattr(obs, "Nocc", 0))
     lambda_occ = float(getattr(obs, "lambda_occ", 1.0))
 
-    # Build orbit matrix
+    # Build orbit matrix (Julia)
+    tA0 = time.perf_counter()
     try:
         A = build_A_matrix_stellar_julia(
             R_star_m=R,
@@ -192,18 +274,37 @@ def solve_ospm_theta_stellar(theta, obs, *, halo_type="nfw"):
             Norbit=Norbit,
             theta=[rho_s, r_s, MBH],
             halo_type=halo_type,
-            return_occ=True
+            return_occ=True,
         )
-    except Exception:
-        return float(np.inf), None, None
+    except Exception as e:
+        out = (float(np.inf), None, None)
+        if diag:
+            meta |= {
+                "stage": "build_A_exc",
+                "exc": type(e).__name__,
+                "t_buildA": time.perf_counter() - tA0,
+                "t_total": time.perf_counter() - t_all0,
+            }
+            return (*out, meta)
+        return out
+    tA1 = time.perf_counter()
 
     A = np.asarray(A, float)
-
     if A.ndim != 2 or A.shape[1] != Norbit or A.shape[0] != R.size + Nocc:
-        return float(np.inf), None, None
+        out = (float(np.inf), None, None)
+        if diag:
+            meta |= {
+                "stage": "A_malformed",
+                "A_shape": tuple(A.shape),
+                "t_buildA": tA1 - tA0,
+                "t_total": time.perf_counter() - t_all0,
+            }
+            return (*out, meta)
+        return out
 
-    # Solve weights
-    w = solve_weights_stellar(
+    # Solve weights (SciPy)
+    tW0 = time.perf_counter()
+    w, wmeta = solve_weights_stellar(
         A,
         verr_star_mps=ve,
         rv_mask=rv,
@@ -211,43 +312,85 @@ def solve_ospm_theta_stellar(theta, obs, *, halo_type="nfw"):
         Nocc=Nocc,
         lambda_occ=lambda_occ,
         alpha=float(getattr(obs, "alpha_w", 1e-2)),
-        maxiter=int(getattr(obs, "w_maxiter", 500))
+        maxiter=int(getattr(obs, "w_maxiter", 500)),
+        seed=None,
     )
+    tW1 = time.perf_counter()
 
     if w is None:
-        return float(np.inf), None, None
+        out = (float(np.inf), None, None)
+        if diag:
+            meta |= {
+                "stage": "weights_fail",
+                "t_buildA": tA1 - tA0,
+                "t_weights": tW1 - tW0,
+                "wmeta": wmeta,
+                "t_total": time.perf_counter() - t_all0,
+            }
+            return (*out, meta)
+        return out
 
     # Likelihood
-    ll = stellar_log_likelihood(
-        A,
-        w,
-        verr_star_mps=ve,
-        rv_mask=rv,
-        Nstar=R.size,
-        Nocc=Nocc,
-        lambda_occ=lambda_occ
-    )
+    try:
+        ll = stellar_log_likelihood(
+            A,
+            w,
+            verr_star_mps=ve,
+            rv_mask=rv,
+            Nstar=R.size,
+            Nocc=Nocc,
+            lambda_occ=lambda_occ,
+        )
+    except Exception as e:
+        out = (float(np.inf), None, None)
+        if diag:
+            meta |= {
+                "stage": "ll_exc",
+                "exc": type(e).__name__,
+                "t_buildA": tA1 - tA0,
+                "t_weights": tW1 - tW0,
+                "t_total": time.perf_counter() - t_all0,
+            }
+            return (*out, meta)
+        return out
 
-    chi2_like = -2.0 * ll
+    chi2_like = -2.0 * float(ll)
 
     # Penalties
-    pen1, _, _, _ = chi2_resolution_penalty(
+    pen1 = _safe_float(chi2_resolution_penalty(
         MBH_msun=MBH,
         R_star_m=R,
         v_star_mps=v,
         strength=float(getattr(obs, "PEN_SPHERE_STRENGTH", 2.0)),
-        power=float(getattr(obs, "PEN_SPHERE_POWER", 2.0))
-    )
+        power=float(getattr(obs, "PEN_SPHERE_POWER", 2.0)),
+    )[0], default=0.0)
 
-    pen2, _, _, _, _, _ = mass_slope_penalty(
+    pen2 = _safe_float(mass_slope_penalty(
         theta=[rho_s, r_s, MBH],
         halo_type=halo_type,
         R_star_m=R,
-        strength=float(getattr(obs, "PEN_SLOPE_STRENGTH", 0.5))
-    )
+        strength=float(getattr(obs, "PEN_SLOPE_STRENGTH", 0.5)),
+    )[0], default=0.0)
 
     chi2 = chi2_like + pen1 + pen2
 
     nu = max(int(rv.sum()) - 3, 1)
+    chi2_red = float(chi2 / nu)
 
-    return float(chi2 / nu), w, A @ w
+    model = A @ w
+
+    if diag:
+        meta |= {
+            "ok": True,
+            "stage": "ok",
+            "t_buildA": tA1 - tA0,
+            "t_weights": tW1 - tW0,
+            "t_total": time.perf_counter() - t_all0,
+            "wmeta": wmeta,
+            "chi2_like": float(chi2_like),
+            "pen_res": float(pen1),
+            "pen_slope": float(pen2),
+        }
+        return chi2_red, w, model, meta
+
+    return chi2_red, w, model

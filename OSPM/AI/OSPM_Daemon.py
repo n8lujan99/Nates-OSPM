@@ -53,7 +53,7 @@ class Agent(nn.Module):
     def act(self, x, noise):
         a = self.forward(x) + noise*torch.randn_like(x)
         return torch.clamp(a, -1.0, 1.0)
-    
+
 # ============================================================
 # Deck
 # ============================================================
@@ -235,26 +235,84 @@ class Runner:
 # Explores parameter space, records outcomes, and terminates
 # when information gain flattens or run limits are reached.
 def run_daemon(config, physics_engine):
+    import time
+    from collections import defaultdict
+
     deck=Deck(config)
     runner=Runner(config)
     corpo=Corpo(physics_engine)
     fixer=Fixer(config)
-    flat=FlatDetector( config.get("FLAT_WINDOW",200),
-        config.get("FLAT_THRESHOLD",1e-6), config.get("FLAT_PATIENCE",3) )
+    flat=FlatDetector(
+        config.get("FLAT_WINDOW",200),
+        config.get("FLAT_THRESHOLD",1e-6),
+        config.get("FLAT_PATIENCE",3)
+    )
+
     runs=0
     best=np.inf
+
+    # --- profiling accumulators ---
+    t_acc = defaultdict(float)
+    t_cnt = defaultdict(int)
+    PROF_EVERY = int(config.get("PROF_EVERY",25))
+
     while runs<config["MAX_RUNS"]:
-        for theta,pid in runner.propose(deck):
+
+        # ---- propose ----
+        t0=time.perf_counter()
+        props = runner.propose(deck)
+        dt=time.perf_counter()-t0
+        t_acc["propose"]+=dt
+        t_cnt["propose"]+=1
+
+        for theta,pid in props:
+
+            # ---- physics eval ----
+            t0=time.perf_counter()
             status,chi2=corpo.eval(theta)
+            dt=time.perf_counter()-t0
+            t_acc["eval"]+=dt
+            t_cnt["eval"]+=1
+
             reward=fixer.reward(status,chi2)
+
+            # ---- deck add ----
+            t0=time.perf_counter()
             deck.add(theta,chi2,reward,pid,status)
+            dt=time.perf_counter()-t0
+            t_acc["add"]+=dt
+            t_cnt["add"]+=1
+
             flat.push(chi2)
             fixer.unlock(deck,runner)
             if chi2<best: best=chi2
             runs+=1
+
+            # ---- periodic report ----
+            if runs % PROF_EVERY == 0:
+                def avg(k):
+                    return t_acc[k]/t_cnt[k] if t_cnt[k] else 0.0
+
+                print(
+                    f"[PROF] runs={runs} "
+                    f"propose={avg('propose'):.4f}s "
+                    f"eval={avg('eval'):.4f}s "
+                    f"add={avg('add'):.4f}s"
+                )
+
+                t_acc.clear()
+                t_cnt.clear()
+
             if flat.flat():
                 deck.save()
                 print(f"[Daemon] Flat region detected after {runs} runs")
                 return
+
+        # ---- training ----
+        t0=time.perf_counter()
         runner.train(deck)
+        dt=time.perf_counter()-t0
+        t_acc["train"]+=dt
+        t_cnt["train"]+=1
+
     deck.save()

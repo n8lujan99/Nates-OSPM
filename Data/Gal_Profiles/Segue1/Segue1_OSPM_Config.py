@@ -62,7 +62,7 @@ CONFIG = {
     # OSPM numerical setup
     # =========================================================
 
-    "NORBIT":              1500,   # RESOLUTION
+    "NORBIT":              800,   # RESOLUTION
     "BINNING": {
         "MIN_BINS":            5,
         "N_TARGET_CIRC":       5,
