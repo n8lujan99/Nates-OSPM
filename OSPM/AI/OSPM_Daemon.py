@@ -1,22 +1,18 @@
 # OSPM_Runner.py
 # STAYS IN PYTHON FOREVER
 # Parallelism lives in Julia, not here
-
 import os, time
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 from collections import deque
-
 torch.set_num_threads(1)
 torch.backends.cudnn.benchmark = False
-
 try:
     from sklearn.preprocessing import StandardScaler
 except Exception:
     StandardScaler = None
-
 # ============================================================
 # Small utilities
 # ============================================================
@@ -30,7 +26,6 @@ def min_dist(theta, arr):
 class IdentityScaler:
     def fit(self, X): return self
     def transform(self, X): return X
-
 # ============================================================
 # Models
 # ============================================================
@@ -53,7 +48,6 @@ class Agent(nn.Module):
     def act(self, x, noise):
         a = self.forward(x) + noise*torch.randn_like(x)
         return torch.clamp(a, -1.0, 1.0)
-
 # ============================================================
 # Deck
 # ============================================================
@@ -103,14 +97,12 @@ class Deck:
         self._dirty+=1
         if self._dirty>=self.flush:
             self.save(); self._dirty=0
-
 # ============================================================
 # Physics wrapper
 # ============================================================
 # Strict interface to the external dynamics engine.
 # Only numerically and dynamically self-consistent runs are
 # accepted; all failures are hard rejections.
-
 class Corpo:
     def __init__(self, engine):
         self.engine = engine
@@ -128,13 +120,11 @@ class Corpo:
             raise
         except Exception:
             raise
-
 # ============================================================
 # AI helpers
 # ============================================================
 # Controls when learning is enabled and detects when exploration
 # has saturated in chi^2 space.
-
 class Fixer:
     def __init__(self,cfg):
         self.warmup=int(cfg.get("AI_START_AFTER",500))
@@ -159,7 +149,6 @@ class FlatDetector:
         if len(self.buf)<self.w: self.cnt=0; return
         self.cnt=self.cnt+1 if np.std(self.buf)<self.eps else 0
     def flat(self): return self.cnt>=self.p
-
 # ============================================================
 # Runner
 # ============================================================
@@ -227,7 +216,6 @@ class Runner:
         yt=torch.tensor(y,dtype=torch.float32)
         loss=((self.model(Xt)-yt)**2).mean()
         self.opt_m.zero_grad(); loss.backward(); self.opt_m.step()
-
 # ============================================================
 # Daemon
 # ============================================================
