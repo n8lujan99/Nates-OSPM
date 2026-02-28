@@ -62,7 +62,7 @@ CONFIG = {
     # OSPM numerical setup
     # =========================================================
 
-    "NORBIT":              800,   # RESOLUTION
+    "NORBIT":              1000,   # RESOLUTION
     "BINNING": {
         "MIN_BINS":            5,
         "N_TARGET_CIRC":       5,
@@ -75,9 +75,9 @@ CONFIG = {
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
     "INITIAL_THETA":   [0.1, 2.0, 50000],
     "THETA_BOUNDS": [
-        (1e-3, 10.0),     # rho_s
-        (0.1, 300.0),    # r_s
-        (0.0, 1e6),      # MBH
+        (1e-4, 50.0),     # rho_s
+        (5, 5000.0),    # r_s
+        (0.0, 1.5e6),      # MBH
     ],
 
     # Penalties
@@ -98,11 +98,7 @@ CONFIG = {
     # Deck semantics
     # =========================================================
     "REQUIRE_COLUMNS": ["rho_s", "r_s", "MBH", "chi2", "reward", "status", "proposal_id"],
-    "ALLOWED_STATUSES": [
-        "todo", "seed", "pass",
-        "orbit_fail", "numeric_fail",
-        "unknown_fail", "forbidden"
-    ],
+    "ALLOWED_STATUSES": [ "todo", "seed", "pass", "orbit_fail", "numeric_fail", "unknown_fail", "forbidden" ],
     "FILL_DEFAULT_STATUS": "todo",
 
     # =========================================================
@@ -117,8 +113,8 @@ CONFIG = {
     # =========================================================
     # AI / learning
     # =========================================================
-    "AI_START_AFTER":        250,
-    "MIN_TRAIN_POINTS":      800,
+    "AI_START_AFTER":        500,
+    "MIN_TRAIN_POINTS":      500,
     "TRAIN_WINDOW":          2000,
     "AI_NOISE_INIT":         0.30,
     "AI_NOISE_MIN":          0.02,
@@ -129,8 +125,8 @@ CONFIG = {
     "AI_SNAPSHOT_EVERY":     2000,
     "FLAT_WINDOW":           200,
     "FLAT_THRESHOLD":        1e-6,
-    "FLAT_PATIENCE":         3,
-    "AI_RESET_ON_FLAT":      False,
+    "FLAT_PATIENCE":         10,
+    "AI_RESET_ON_FLAT":      True,
 
     # =========================================================
     # Termination
@@ -138,7 +134,7 @@ CONFIG = {
     "MAX_RUNS":              100000,
     "STOP_NO_IMPROVEMENT":   1000,
     "IMPROVEMENT_EPSILON":   1e-6,
-    "LOG_INTERVAL":          500,
+    "LOG_INTERVAL":          10,
 
     # =========================================================
     # Constants
