@@ -346,26 +346,15 @@ end
 #   - rows 1:Nvlos   : velocity likelihood for stars with has_vlos=true
 #   - rows Nvlos+1:end : occupancy constraint (all stars), optional
 # ======================================================================
-function build_A_matrix_hybrid(
-        Norbit::Int,
-        R_star_m::Vector{Float64},
-        has_vlos::AbstractVector{Bool},
-        v_star_mps::Vector{Float64},
-        verr_star_mps::Vector{Float64},
-        sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String;
-        nsteps::Int=4000, Lfrac::NTuple{5,Float64}=(0.05,0.2,0.4,0.7,1.0), dt_frac_orbit::Float64=0.01,
-        dR_frac::Float64=0.05, dR_floor_frac::Float64=0.01, dR_floor_pc::Float64=0.0,
-        Nbins_occ::Int=6, return_occ::Bool=true, max_attempts_factor::Int=60,
-        diag::Bool=false)
-
-    #GC.enable(true) #enable GC to prevent OOM in large runs. Note: GC is thread-safe in Julia, but it may introduce pauses. Monitor performance and adjust if needed.
-
+function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64},
+        verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=4000, 
+        Lfrac::NTuple{5,Float64}=(0.05,0.2,0.4,0.7,1.0), dt_frac_orbit::Float64=0.01, dR_frac::Float64=0.05, dR_floor_frac::Float64=0.01, dR_floor_pc::Float64=0.0,
+        Nbins_occ::Int=6, return_occ::Bool=true, max_attempts_factor::Int=60, diag::Bool=false)
     Nstar = length(R_star_m)
     @assert length(has_vlos)==Nstar
     @assert length(v_star_mps)==Nstar
     @assert length(verr_star_mps)==Nstar
     Nstar==0 && return zeros(Float64,0,Norbit)
-
     # vlos index map
     vlos_idx = Int[]
     sizehint!(vlos_idx, Nstar)
@@ -373,220 +362,149 @@ function build_A_matrix_hybrid(
         has_vlos[i] && push!(vlos_idx, i)
     end
     Nvlos = length(vlos_idx)
-
     ctx = get_halo_context(rho_s,r_s,MBH,halo_type)
-
     sini = clamp01(f64(sini))
     cosi = sqrt(max(1.0 - sini*sini, 0.0))
-
     Rmin = minimum(R_star_m)
     Rmax = maximum(R_star_m)
     !(isfinite(Rmin)&&isfinite(Rmax)&&Rmax>Rmin) &&
         return zeros(Float64, Nvlos + (return_occ ? Nbins_occ : 0), Norbit)
-
     shells = sort(copy(R_star_m))
-
     # occupancy bin edges
     occ_edges = collect(range(Rmin,Rmax; length=Nbins_occ+1))
-
     A_vlos = zeros(Float64, Nvlos, Norbit)
     A_occ  = zeros(Float64, Nbins_occ, Norbit)
-
     orbit_ctx = (frc=ctx.frc, R_pos=ctx.R, halo=ctx.halo)
     theta0 = f64(pi/2)
-
     # ------------------------------
-    # THREADED ORBIT GENERATION
+    # SERIAL ORBIT GENERATION 
     # ------------------------------
-    next_col     = Atomic{Int}(1)
-    attempts     = Atomic{Int}(0)
+    rng         = MersenneTwister(0x5eed1234)
+    idx_local   = 1
+    attempts    = 0
     max_attempts = max_attempts_factor * Norbit
-
-    BLOCKSIZE = 4   # try 4, then 8 if atomics still show up in profiles
-
-    Threads.@threads for tid in 1:nthreads()
-
-        rng = MersenneTwister(0x5eed1234 + tid)
-        idx_local = tid
-
-        while true
-
-            # hard stop on attempts
-            a = Threads.atomic_add!(attempts, 1)
-            a > max_attempts && break
-
-            # claim a small block of columns at once
-            start_col = Threads.atomic_add!(next_col, BLOCKSIZE)
-
-            start_col > Norbit && break
-
-            stop_col = min(start_col + BLOCKSIZE - 1, Norbit)
-
-            for c_claim in start_col:stop_col
-
-                rapo = f64(shells[idx_local])
-                idx_local = (idx_local == length(shells)) ? 1 : (idx_local + 1)
-                !(isfinite(rapo) && rapo > 0) && continue
-
-                lf = Lfrac[1 + (a % length(Lfrac))]   # deterministic cycle across attempts
-                r0_frac = 0.95 + 0.04*rand(rng)
-
-                ic, Lz0, E0, vc, st = launch_orbit_apocenter(
-                    rapo=rapo,
-                    theta0=theta0,
-                    Lz_frac=f64(lf),
-                    pot=ctx.pot,
-                    frc=ctx.frc,
-                    r0_frac=r0_frac,
-                    dt_frac=dt_frac_orbit
-                )
-
-                st != :ok && continue
-
-                r, vr, theta = integrate_orbit_rk4(
-                    ic=ic,
-                    xLz=Lz0,
-                    ctx=orbit_ctx,
-                    nsteps=nsteps
-                )
-
-                isempty(r) && continue
-
-                # local column buffers
-                col_vlos = zeros(Float64, Nvlos)
-                col_occ  = zeros(Float64, Nbins_occ)
-
-                Nhits = length(r)
-                s_arr    = Vector{Float64}(undef, Nhits)
-                vphi_arr = Vector{Float64}(undef, Nhits)
-
-                @inbounds for i in 1:Nhits
-                    si = _ssin(f64(theta[i]))
-                    ri = f64(r[i])
-                    s_arr[i] = ri * si
-                    vphi_arr[i] = f64(Lz0) / (ri * si)
+    filled = 0
+    @inbounds for c_claim in 1:Norbit
+        attempts += 1
+        if attempts > max_attempts
+            break
+        end
+        rapo = f64(shells[idx_local])
+        idx_local = (idx_local == length(shells)) ? 1 : (idx_local + 1)
+        !(isfinite(rapo) && rapo > 0) && continue
+        lf = Lfrac[1 + (attempts % length(Lfrac))]   # deterministic cycle across attempts
+        r0_frac = 0.95 + 0.04*rand(rng)
+        ic, Lz0, E0, vc, st = launch_orbit_apocenter( rapo=rapo, theta0=theta0, Lz_frac=f64(lf),
+            pot=ctx.pot, frc=ctx.frc, r0_frac=r0_frac, dt_frac=dt_frac_orbit)
+        st != :ok && continue
+        r, vr, theta = integrate_orbit_rk4( ic=ic, xLz=Lz0, ctx=orbit_ctx, nsteps=nsteps )
+        isempty(r) && continue
+        # local column buffers
+        col_vlos = zeros(Float64, Nvlos)
+        col_occ  = zeros(Float64, Nbins_occ)
+        Nhits = length(r)
+        s_arr    = Vector{Float64}(undef, Nhits)
+        vphi_arr = Vector{Float64}(undef, Nhits)
+        @inbounds for i in 1:Nhits
+            si = _ssin(f64(theta[i]))
+            ri = f64(r[i])
+            s_arr[i] = ri * si
+            vphi_arr[i] = f64(Lz0) / (ri * si)
+        end
+        if return_occ && Nhits > 0
+            @inbounds for j in 1:Nbins_occ
+                lo = occ_edges[j]
+                hi = occ_edges[j+1]
+                cnt = 0
+                @inbounds for x in s_arr
+                    cnt += (x >= lo && x < hi) ? 1 : 0
                 end
-
-                if return_occ && Nhits > 0
-                    @inbounds for j in 1:Nbins_occ
-                        lo = occ_edges[j]
-                        hi = occ_edges[j+1]
-                        cnt = 0
-                        @inbounds for x in s_arr
-                            cnt += (x >= lo && x < hi) ? 1 : 0
-                        end
-                        col_occ[j] = cnt / Nhits
-                    end
-                end
-
-                vlos_arr = @. sini*f64(vr) + cosi*vphi_arr
-
-                pidx = sortperm(s_arr)
-                s_sorted    = s_arr[pidx]
-                vlos_sorted = vlos_arr[pidx]
-
-                inv_sqrt2pi = inv(sqrt(2*pi))
-
-                if Nvlos > 0
-                    @inbounds for row in 1:Nvlos
-                        istar = vlos_idx[row]
-                        Ri = f64(R_star_m[istar])
-                        vi = f64(v_star_mps[istar])
-                        si = f64(verr_star_mps[istar])
-                        s2 = si*si
-                        if !(isfinite(s2) && s2 > 0)
-                            col_vlos[row] = 0.0
-                            continue
-                        end
-                        dR = max(dR_frac*Ri, 1e-12)
-                        lo = Ri - dR
-                        hi = Ri + dR
-                        j0 = searchsortedfirst(s_sorted, lo)
-                        j1 = searchsortedlast(s_sorted, hi)
-                        if j1 < j0
-                            col_vlos[row] = 0.0
-                            continue
-                        end
-                        p = 0.0
-                        nhit = j1 - j0 + 1
-                        inv_norm = inv_sqrt2pi / si
-                        @inbounds for j in j0:j1
-                            dv = vi - vlos_sorted[j]
-                            p += exp(-0.5*(dv*dv)/s2)
-                        end
-                        col_vlos[row] = (p*inv_norm) / nhit
-                    end
-                end
-
-                if Nvlos > 0
-                    @inbounds A_vlos[:, c_claim] .= col_vlos
-                end
-                if return_occ
-                    @inbounds A_occ[:, c_claim] .= col_occ
-                end
+                col_occ[j] = cnt / Nhits
             end
         end
+        vlos_arr = @. sini*f64(vr) + cosi*vphi_arr
+        pidx = sortperm(s_arr)
+        s_sorted    = s_arr[pidx]
+        vlos_sorted = vlos_arr[pidx]
+        inv_sqrt2pi = inv(sqrt(2*pi))
+        if Nvlos > 0
+            @inbounds for row in 1:Nvlos
+                istar = vlos_idx[row]
+                Ri = f64(R_star_m[istar])
+                vi = f64(v_star_mps[istar])
+                si = f64(verr_star_mps[istar])
+                s2 = si*si
+                if !(isfinite(s2) && s2 > 0)
+                    col_vlos[row] = 0.0
+                    continue
+                end
+                dR = max(dR_frac*Ri, 1e-12)
+                lo = Ri - dR
+                hi = Ri + dR
+                j0 = searchsortedfirst(s_sorted, lo)
+                j1 = searchsortedlast(s_sorted, hi)
+                if j1 < j0
+                    col_vlos[row] = 0.0
+                    continue
+                end
+                p = 0.0
+                nhit = j1 - j0 + 1
+                inv_norm = inv_sqrt2pi / si
+                @inbounds for j in j0:j1
+                    dv = vi - vlos_sorted[j]
+                    p += exp(-0.5*(dv*dv)/s2)
+                end
+                col_vlos[row] = (p*inv_norm) / nhit
+            end
+        end
+        if Nvlos > 0
+            @inbounds A_vlos[:, c_claim] .= col_vlos
+        end
+        if return_occ
+            @inbounds A_occ[:, c_claim] .= col_occ
+        end
+        filled = c_claim
     end
-
-    filled = min(next_col[] - 1, Norbit)
     filled < Norbit && println("WARNING: build_A_matrix_hybrid filled ", filled, " / ", Norbit)
-
     A = return_occ ? vcat(A_vlos, A_occ) : A_vlos
-    GC.gc()
-    diag ? (A, Dict("filled"=>filled, "attempts"=>attempts[])) : A
+    diag ? (A, Dict("filled"=>filled, "attempts"=>attempts)) : A
 end
 
 
 # Back-compat: old name. Treats all stars as having vlos.
 function build_A_matrix_stellar(Norbit::Int, R_star_m::Vector{Float64}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64},
-        sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String;
-        nsteps::Int=4000, Lfrac::NTuple{5,Float64}=(0.05,0.2,0.4,0.7,1.0), dt_frac_orbit::Float64=0.01,
-        dR_frac::Float64=0.05, dR_floor_frac::Float64=0.01, dR_floor_pc::Float64=0.0,
-        Nbins_occ::Int=6, return_occ::Bool=true, max_attempts_factor::Int=60,
-        diag::Bool=false)
-
+        sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=4000, Lfrac::NTuple{5,Float64}=(0.05,0.2,0.4,0.7,1.0), dt_frac_orbit::Float64=0.01,
+        dR_frac::Float64=0.05, dR_floor_frac::Float64=0.01, dR_floor_pc::Float64=0.0, Nbins_occ::Int=6, return_occ::Bool=true, max_attempts_factor::Int=60, diag::Bool=false)
+    
     has_vlos = trues(length(R_star_m))
-    build_A_matrix_hybrid(Norbit, R_star_m, has_vlos, v_star_mps, verr_star_mps,
-                          sini, rho_s, r_s, MBH, halo_type;
-                          nsteps=nsteps, Lfrac=Lfrac, dt_frac_orbit=dt_frac_orbit,
-                          dR_frac=dR_frac, dR_floor_frac=dR_floor_frac, dR_floor_pc=dR_floor_pc,
-                          Nbins_occ=Nbins_occ, return_occ=return_occ, max_attempts_factor=max_attempts_factor,
-                          diag=diag)
+    build_A_matrix_hybrid(Norbit, R_star_m, has_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, halo_type; nsteps=nsteps, Lfrac=Lfrac, dt_frac_orbit=dt_frac_orbit,
+            dR_frac=dR_frac, dR_floor_frac=dR_floor_frac, dR_floor_pc=dR_floor_pc, Nbins_occ=Nbins_occ, return_occ=return_occ, max_attempts_factor=max_attempts_factor, diag=diag)
 end
 
 function build_A_matrix_from_ctx(ctx::HaloContext, th0, dt, r_centers_m, valid, sini, nsteps)
     shells=r_centers_m[valid]; Ndat=length(shells); theta0=f64(th0[1]); rng=MersenneTwister(0xdeadbeef)
     dt_frac_orbit=0.01; Lfrac=(0.05,0.2,0.4,0.7,1.0); Norbit=length(shells)*length(Lfrac)
     A=zeros(Float64,Ndat,Norbit)
-
     edges=similar(r_centers_m,length(r_centers_m)+1)
     edges[2:end-1].=0.5.*(r_centers_m[1:end-1].+r_centers_m[2:end])
     edges[1]=0.0; edges[end]=Inf
-
     kept=0; rej_turn=0; rej_energy=0; rej_force=0; dErel_max=0.0; dErel_bad=0; col=1
     orbit_ctx=(frc=ctx.frc, R_pos=ctx.R, halo=ctx.halo)
-
     @inbounds for rapo0 in shells
         rapo=f64(rapo0)
         if !(isfinite(rapo)&&rapo>0); col += length(Lfrac); continue; end
-
         for lf in Lfrac
             r0_frac=0.95 + 0.04*rand(rng)
-            ic,Lz0,E0,vc,st=launch_orbit_apocenter(rapo=rapo,theta0=theta0,Lz_frac=f64(lf),
-                                                  pot=ctx.pot,frc=ctx.frc,r0_frac=r0_frac,dt_frac=dt_frac_orbit)
-
+            ic,Lz0,E0,vc,st=launch_orbit_apocenter(rapo=rapo,theta0=theta0,Lz_frac=f64(lf), pot=ctx.pot,frc=ctx.frc,r0_frac=r0_frac,dt_frac=dt_frac_orbit)
             if st!=:ok
                 st==:reject_turning ? (rej_turn+=1) : (st==:reject_force || st==:reject_vc ? (rej_force+=1) : (rej_energy+=1))
                 col += 1; continue
             end
-
             r,vr,theta=integrate_orbit_rk4(ic=ic,xLz=Lz0,ctx=orbit_ctx,nsteps=nsteps)
             isempty(r) && (rej_energy+=1; col+=1; continue)
-
             sig2=orbit_to_sigma2_profile(r_arr=r, th_arr=theta, vr_arr=vr, xLz=Lz0, r_centers_m=r_centers_m, edges=edges, sini=sini)
             A[:,col] .= sig2[valid]
             kept += 1
-
             if kept <= 8
                 Emin=Inf; Emax=-Inf; Esum=0.0; nE=0
                 @inbounds for i in eachindex(r)
@@ -602,11 +520,9 @@ function build_A_matrix_from_ctx(ctx::HaloContext, th0, dt, r_centers_m, valid, 
                     println("dE/<E>=",dErel," rapo=",rapo," Lfrac=",lf," n=",length(r))
                 end
             end
-
             col += 1
         end
     end
-
     println("orbit columns kept = ",kept," / ",Norbit," | reject_turning=",rej_turn," reject_energy=",rej_energy," reject_force=",rej_force,
             " | dErel_max(first few)=",dErel_max," dErel_bad(first few)=",dErel_bad)
     A

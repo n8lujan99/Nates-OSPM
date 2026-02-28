@@ -18,7 +18,7 @@ CONFIG = {
     # =========================================================
     # Parallelization
     # =========================================================
-    "N_WORKERS": 4,   # local default; override via launcher on HPC
+    "N_WORKERS": 6,   # local default; override via launcher on HPC
 
     # =========================================================
     # Identity
@@ -108,8 +108,8 @@ CONFIG = {
     # =========================================================
     # Sampling & control
     # =========================================================
-    "BATCH_SIZE":          4,
-    "MIN_BATCH_SIZE":      8,
+    "BATCH_SIZE":          64,
+    "MIN_BATCH_SIZE":      32,
     "MAX_BATCH_SIZE":      256,
     "_PRINT_EVERY":        10,
     "_print_counter":      4,
