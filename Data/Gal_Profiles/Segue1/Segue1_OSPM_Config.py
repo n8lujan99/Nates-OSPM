@@ -75,9 +75,9 @@ CONFIG = {
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
     "INITIAL_THETA":   [0.1, 2.0, 50000],
     "THETA_BOUNDS": [
-        (1e-4, 50.0),     # rho_s
+        (1e-4, 100.0),     # rho_s
         (5, 5000.0),    # r_s
-        (0.0, 1.5e6),      # MBH
+        (0.0, 1e6),      # MBH
     ],
 
     # Penalties
