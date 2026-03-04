@@ -19,9 +19,8 @@ CONFIG = {
     # =========================================================
     # Parallelization 
     # =========================================================
-    "N_WORKERS": 4, # Equal to the number of CPU cores available 
-    # Local machine: 4 cores
-    # HPC: ## cores
+    "N_WORKERS": 26, # Equal to the number of CPU cores available 
+
 
     # =========================================================
     # Identity
@@ -64,7 +63,7 @@ CONFIG = {
     # =========================================================
     # OSPM numerical setup
     # =========================================================
-    "NORBIT":              2000, # of orbits to sample per evaluation (Karl's default: 10,000) 10,000 is a lot and bogging down the system. 
+    "NORBIT":              1000, 
     "BINNING": {
         "MIN_BINS":            5,
         "N_TARGET_CIRC":       5,
@@ -75,11 +74,12 @@ CONFIG = {
     # Parameter space
     # =========================================================
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA":   [1.0, 500.0, 2000000.0],   
+    "INITIAL_THETA": [0.1, 800.0, 100000.0],
+
     "THETA_BOUNDS": [
-        (1e-6, 100.0),     # rho_s
-        (50.0, 2e4),      # r_s
-        (0.0, 1e7),      # MBH
+        (1e-5, 10.0),      # rho_s  (reduce extreme densities)
+        (50.0, 5000.0),    # r_s    (physically reasonable halo scale)
+        (0.0, 1e6),        # MBH    (conservative upper bound)
     ],
 
     # Penalties
@@ -106,7 +106,7 @@ CONFIG = {
     # =========================================================
     # Sampling & control
     # =========================================================
-    "BATCH_SIZE":          32,
+    "BATCH_SIZE":          26,
     "MIN_BATCH_SIZE":      8,
     "MAX_BATCH_SIZE":      256,
     "_PRINT_EVERY":        5,

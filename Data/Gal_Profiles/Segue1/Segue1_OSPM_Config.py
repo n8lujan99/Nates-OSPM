@@ -18,7 +18,7 @@ CONFIG = {
     # =========================================================
     # Parallelization
     # =========================================================
-    "N_WORKERS": 6,   # local default; override via launcher on HPC
+    "N_WORKERS": 24,   # local default; override via launcher on HPC
 
     # =========================================================
     # Identity
@@ -62,11 +62,11 @@ CONFIG = {
     # OSPM numerical setup
     # =========================================================
 
-    "NORBIT":              1000,   # RESOLUTION
+    "NORBIT":              2000,   # RESOLUTION
     "BINNING": {
-        "MIN_BINS":            5,
+        "MIN_BINS":            4,
         "N_TARGET_CIRC":       5,
-        "MIN_PER_BIN_CIRC":    6,
+        "MIN_PER_BIN_CIRC":    3,
     },
 
     # =========================================================
@@ -105,7 +105,7 @@ CONFIG = {
     # Sampling & control
     # =========================================================
     "BATCH_SIZE":          64,
-    "MIN_BATCH_SIZE":      32,
+    "MIN_BATCH_SIZE":      64,
     "MAX_BATCH_SIZE":      256,
     "_PRINT_EVERY":        10,
     "_print_counter":      4,
@@ -115,7 +115,7 @@ CONFIG = {
     # =========================================================
     "AI_START_AFTER":        500,
     "MIN_TRAIN_POINTS":      500,
-    "TRAIN_WINDOW":          2000,
+    "TRAIN_WINDOW":          500,
     "AI_NOISE_INIT":         0.30,
     "AI_NOISE_MIN":          0.02,
     "AI_NOISE_TAU":          5000,

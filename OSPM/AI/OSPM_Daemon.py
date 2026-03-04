@@ -16,8 +16,6 @@ except Exception:
 # ============================================================
 # Small utilities
 # ============================================================
-# Lightweight helpers for bounded sampling and distance checks.
-# These control exploration geometry only and encode no physics.
 def clamp(x, lo, hi): return max(lo, min(hi, x))
 def random_theta(bounds): return [np.random.uniform(lo, hi) for lo, hi in bounds]
 def min_dist(theta, arr):
@@ -29,9 +27,6 @@ class IdentityScaler:
 # ============================================================
 # Models
 # ============================================================
-# Simple neural helpers used to bias exploration toward successful
-# regions of parameter space. They never see the physics engine
-# and do not perform optimization.
 class Model(nn.Module):
     def __init__(self, dim, width=64):
         super().__init__()
@@ -51,9 +46,6 @@ class Agent(nn.Module):
 # ============================================================
 # Deck
 # ============================================================
-# Persistent record of all attempted configurations.
-# Stores both successful and failed runs so forbidden regions
-# are learned and not re-sampled.
 class Deck:
     def __init__(self, config):
         self.config = config
@@ -100,9 +92,6 @@ class Deck:
 # ============================================================
 # Physics wrapper
 # ============================================================
-# Strict interface to the external dynamics engine.
-# Only numerically and dynamically self-consistent runs are
-# accepted; all failures are hard rejections.
 class Corpo:
     def __init__(self, engine):
         self.engine = engine
@@ -123,8 +112,6 @@ class Corpo:
 # ============================================================
 # AI helpers
 # ============================================================
-# Controls when learning is enabled and detects when exploration
-# has saturated in chi^2 space.
 class Fixer:
     def __init__(self,cfg):
         self.warmup=int(cfg.get("AI_START_AFTER",500))
@@ -152,8 +139,6 @@ class FlatDetector:
 # ============================================================
 # Runner
 # ============================================================
-# Generates candidate parameter vectors and updates exploration
-# strategy based on past successful runs.
 class Runner:
     def __init__(self,cfg):
         self.cfg=cfg
@@ -219,75 +204,116 @@ class Runner:
 # ============================================================
 # Daemon
 # ============================================================
-# Main orchestration loop.
-# Explores parameter space, records outcomes, and terminates
-# when information gain flattens or run limits are reached.
 def run_daemon(config, physics_engine):
-    import time
     from collections import defaultdict
 
-    deck=Deck(config)
-    runner=Runner(config)
-    corpo=Corpo(physics_engine)
-    fixer=Fixer(config)
-    flat=FlatDetector(
-        config.get("FLAT_WINDOW",200),
-        config.get("FLAT_THRESHOLD",1e-6),
-        config.get("FLAT_PATIENCE",3)
+    deck   = Deck(config)
+    runner = Runner(config)
+    corpo  = Corpo(physics_engine)
+    fixer  = Fixer(config)
+    flat   = FlatDetector(
+        config.get("FLAT_WINDOW", 200),
+        config.get("FLAT_THRESHOLD", 1e-6),
+        config.get("FLAT_PATIENCE", 3)
     )
 
-    runs=0
-    best=np.inf
+    runs = 0
+    best = np.inf
 
-    # --- profiling accumulators ---
-    t_acc = defaultdict(float)
-    t_cnt = defaultdict(int)
-    PROF_EVERY = int(config.get("PROF_EVERY",25))
+    t_acc  = defaultdict(float)
+    t_cnt  = defaultdict(int)
+    PROF_EVERY = int(config.get("PROF_EVERY", 25))
 
-    while runs<config["MAX_RUNS"]:
+    obs       = getattr(physics_engine, "__wrapped_obs__", None)
+    halo_type = getattr(physics_engine, "__halo_type__", config.get("HALO_TYPE", "nfw"))
+    use_batch = obs is not None
+
+    if use_batch:
+        from juliacall import Main
+        import juliacall
+        jl_batch   = Main.OSPMPhysicsSpherical.evaluate_batch_theta
+        sini       = float(obs.sini)
+        Norbit     = int(obs.Norbit)
+        print(f"[Daemon] batch mode ON — Norbit={Norbit}, Nstar_vlos={obs.Nstar_vlos}")
+    else:
+        print("[Daemon] batch mode OFF — falling back to serial corpo.eval")
+
+    while runs < config["MAX_RUNS"]:
 
         # ---- propose ----
-        t0=time.perf_counter()
+        t0    = time.perf_counter()
         props = runner.propose(deck)
-        dt=time.perf_counter()-t0
-        t_acc["propose"]+=dt
-        t_cnt["propose"]+=1
+        t_acc["propose"] += time.perf_counter() - t0
+        t_cnt["propose"] += 1
 
-        for theta,pid in props:
+        # ---- physics eval ----
+        t0 = time.perf_counter()
 
-            # ---- physics eval ----
-            t0=time.perf_counter()
-            status,chi2=corpo.eval(theta)
-            dt=time.perf_counter()-t0
-            t_acc["eval"]+=dt
-            t_cnt["eval"]+=1
+        if use_batch:
+            thetas    = [theta for theta, pid in props]
+            pids      = [pid   for theta, pid in props]
+            theta_mat = np.array(thetas, dtype=float).T  # shape (ndim, batch)
+            try:
+                jl_statuses, jl_chi2s = jl_batch(
+                    juliacall.convert(Main.Matrix[Main.Float64], theta_mat),
+                    juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m),
+                    juliacall.convert(Main.Vector[Main.Bool],    obs.valid_vlos),
+                    juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps),
+                    juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
+                    sini, Norbit, halo_type,
+                )
+                results = []
+                for i in range(len(thetas)):
+                    chi2   = float(jl_chi2s[i])
+                    status = "pass" if (int(jl_statuses[i]) == 0 and np.isfinite(chi2)) else "numeric_fail"
+                    if not np.isfinite(chi2):
+                        chi2 = np.inf
+                    results.append((status, chi2))
+            except Exception as e:
+                import traceback
+                print("[Daemon] batch eval failed, falling back to serial:", e)
+                traceback.print_exc()
+                results = [corpo.eval(theta) for theta in thetas]
 
-            reward=fixer.reward(status,chi2)
+        else:
+            thetas  = [theta for theta, pid in props]
+            pids    = [pid   for theta, pid in props]
+            results = [corpo.eval(theta) for theta in thetas]
 
-            # ---- deck add ----
-            t0=time.perf_counter()
-            deck.add(theta,chi2,reward,pid,status)
-            dt=time.perf_counter()-t0
-            t_acc["add"]+=dt
-            t_cnt["add"]+=1
+        t_acc["eval"] += time.perf_counter() - t0
+        t_cnt["eval"] += len(props)
+
+        # ---- record results ----
+        for (theta, pid), (status, chi2) in zip(zip(thetas, pids), results):
+            reward = fixer.reward(status, chi2)
+
+            t0 = time.perf_counter()
+            deck.add(theta, chi2, reward, pid, status)
+            t_acc["add"] += time.perf_counter() - t0
+            t_cnt["add"] += 1
 
             flat.push(chi2)
-            fixer.unlock(deck,runner)
-            if chi2<best: best=chi2
-            runs+=1
+            fixer.unlock(deck, runner)
+            if chi2 < best:
+                best = chi2
+            runs += 1
 
-            # ---- periodic report ----
             if runs % PROF_EVERY == 0:
                 def avg(k):
-                    return t_acc[k]/t_cnt[k] if t_cnt[k] else 0.0
+                    n = t_cnt[k]
+                    return (t_acc[k] / n) if n else 0.0
+
+                t_eval    = t_acc["eval"]
+                per_batch = t_eval / max(t_cnt["propose"], 1)
+                per_theta = t_eval / max(t_cnt["eval"], 1)
 
                 print(
-                    f"[PROF] runs={runs} "
+                    f"[PROF] runs={runs} best={best:.4f} "
                     f"propose={avg('propose'):.4f}s "
-                    f"eval={avg('eval'):.4f}s "
+                    f"eval/batch={per_batch:.4f}s "
+                    f"eval/theta={per_theta:.4f}s "
                     f"add={avg('add'):.4f}s"
                 )
-
                 t_acc.clear()
                 t_cnt.clear()
 
@@ -297,10 +323,9 @@ def run_daemon(config, physics_engine):
                 return
 
         # ---- training ----
-        t0=time.perf_counter()
+        t0 = time.perf_counter()
         runner.train(deck)
-        dt=time.perf_counter()-t0
-        t_acc["train"]+=dt
-        t_cnt["train"]+=1
+        t_acc["train"] += time.perf_counter() - t0
+        t_cnt["train"] += 1
 
     deck.save()

@@ -1,38 +1,22 @@
 from __future__ import annotations
-
 import time
 import numpy as np
 from scipy.optimize import minimize
-
 from ..Physics.OSPM_Physics import build_A_matrix_stellar_julia
-from ..Physics.OSPM_PhysicsEngine import (
-    chi2_resolution_penalty,
-    mass_slope_penalty,
-)
-
-# -----------------------------------------------------------
+from ..Physics.OSPM_PhysicsEngine import ( chi2_resolution_penalty, mass_slope_penalty,)
 # Utilities
-# -----------------------------------------------------------
-
 def _as_1d_float(x, name: str) -> np.ndarray:
     a = np.asarray(x, float).reshape(-1)
     if a.size == 0 or not np.all(np.isfinite(a)):
         raise ValueError(f"{name} invalid")
     return a
-
-
 def _safe_float(x, default=np.inf) -> float:
     try:
         y = float(x)
         return y if np.isfinite(y) else float(default)
     except Exception:
         return float(default)
-
-
-# -----------------------------------------------------------
 # Likelihood
-# -----------------------------------------------------------
-
 def stellar_log_likelihood(
     A,
     w,
@@ -70,12 +54,7 @@ def stellar_log_likelihood(
         ll += float(lambda_occ) * float(np.sum(np.log(np.maximum(p[Nstar:], eps))))
 
     return float(ll)
-
-
-# -----------------------------------------------------------
 # Weight Solver
-# -----------------------------------------------------------
-
 def solve_weights_stellar(
     A,
     *,
@@ -210,12 +189,7 @@ def solve_weights_stellar(
         "nit": int(getattr(res, "nit", -1)),
         "nfev": int(getattr(res, "nfev", -1)),
     }
-
-
-# -----------------------------------------------------------
 # Theta Solve
-# -----------------------------------------------------------
-
 def solve_ospm_theta_stellar(theta, obs, *, halo_type: str = "nfw", diag: bool = False):
     """
     Returns:

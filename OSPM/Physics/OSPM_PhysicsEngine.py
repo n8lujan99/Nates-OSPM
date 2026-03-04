@@ -140,7 +140,6 @@ def wrap_physics_engine(base_engine, *, obs, halo_type, config=None):
             if chi2 is None:
                 return float("inf")
 
-        # ---- penalties disabled ----
         pen1 = 0.0
         pen2 = 0.0
         chi2_tot = float(chi2)
@@ -150,5 +149,10 @@ def wrap_physics_engine(base_engine, *, obs, halo_type, config=None):
             print(f"[PHYS] chi2={chi2:10.4f} (penalties disabled) MBH={MBH:9.3e}")
 
         return chi2_tot
+
+    # Attach obs and halo_type so the daemon can use evaluate_batch_theta
+    # and bypass the per-theta Python loop entirely.
+    engine.__wrapped_obs__  = obs
+    engine.__halo_type__    = halo_type
 
     return engine

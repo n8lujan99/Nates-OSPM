@@ -1,11 +1,11 @@
 module OSPMPhysicsSpherical
 @info "OSPMPhysicsSpherical loaded from" @__FILE__
-using LinearAlgebra, StaticArrays, Statistics, Random, Base.Threads
+using LinearAlgebra, StaticArrays, Statistics, Random, Base.Threads, Optim
 export build_R_halo_physical, rho_interp, halo_from_theta, tables_spherical,
        make_potential_force_funcs, integrate_orbit_rk4, orbit_to_sigma2_profile,
        build_A_matrix_julia, ospm_runcheck, build_A_matrix_stellar, build_A_matrix_hybrid,
-       mass_enclosed_two_radii, reset_orbit_cache, evaluate_batch_theta, NTHREADS, set_target_wls!
-
+       mass_enclosed_two_radii, reset_orbit_cache, evaluate_batch_theta, NTHREADS,
+       stellar_log_likelihood_jl, solve_weights_stellar_jl
 #GC.enable(true) #enable GC to prevent OOM in large runs. Note: GC is thread-safe in Julia, but it may introduce pauses. Monitor performance and adjust if needed.
 const NTHREADS = Threads.nthreads()
 const G    = 6.67430e-11
@@ -678,50 +678,401 @@ end
 # ==============================================================
 # Production chi^2 evaluation (same call signature, parallel-safe)
 # ==============================================================
-function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, r_centers_m::Vector{Float64},
-    valid::Vector{Bool}, sini::Float64, nsteps::Int, halo_type::String)
-    nrow, ncol = size(thetas)
-    dim, nbatch = nrow <= ncol ? (nrow, ncol) : (ncol, nrow)
-    getth(i) = nrow <= ncol ?
-        (@inbounds ntuple(j->Float64(thetas[j,i]), dim)) :
-        (@inbounds ntuple(j->Float64(thetas[i,j]), dim))
-    d, w2 = _get_target_wls()
+function build_A_matrix_hybrid(
+        Norbit::Int,
+        R_star_m::Vector{Float64},
+        has_vlos::AbstractVector{Bool},
+        v_star_mps::Vector{Float64},
+        verr_star_mps::Vector{Float64},
+        sini::Float64,
+        rho_s::Float64,
+        r_s::Float64,
+        MBH::Float64,
+        halo_type::String;
+        nsteps::Int=4000,
+        Lfrac::NTuple{5,Float64}=(0.05, 0.2, 0.4, 0.7, 1.0),
+        dt_frac_orbit::Float64=0.01,
+        dR_frac::Float64=0.05,
+        dR_floor_frac::Float64=0.01,
+        dR_floor_pc::Float64=0.0,
+        Nbins_occ::Int=6,
+        return_occ::Bool=true,
+        max_attempts_factor::Int=60,
+        diag::Bool=false)
+
+    Nstar = length(R_star_m)
+    @assert length(has_vlos)       == Nstar
+    @assert length(v_star_mps)     == Nstar
+    @assert length(verr_star_mps)  == Nstar
+    Nstar == 0 && return zeros(Float64, 0, Norbit)
+
+    # ---- vlos index map ----
+    vlos_idx = Int[]
+    sizehint!(vlos_idx, Nstar)
+    @inbounds for i in 1:Nstar
+        has_vlos[i] && push!(vlos_idx, i)
+    end
+    Nvlos = length(vlos_idx)
+
+    ctx   = get_halo_context(rho_s, r_s, MBH, halo_type)
+    sini  = clamp01(f64(sini))
+    cosi  = sqrt(max(1.0 - sini * sini, 0.0))
+    Rmin  = minimum(R_star_m)
+    Rmax  = maximum(R_star_m)
+    Nout  = Nvlos + (return_occ ? Nbins_occ : 0)
+
+    if !(isfinite(Rmin) && isfinite(Rmax) && Rmax > Rmin)
+        return zeros(Float64, Nout, Norbit)
+    end
+
+    shells     = sort(copy(R_star_m))
+    Nshells    = length(shells)
+    occ_edges  = collect(range(Rmin, Rmax; length=Nbins_occ + 1))
+    theta0     = f64(pi / 2)
+    orbit_ctx  = (frc=ctx.frc, R_pos=ctx.R, halo=ctx.halo)
+
+    # Output matrices — each column written by exactly one thread, no races
+    A_vlos = zeros(Float64, Nvlos,    Norbit)
+    A_occ  = zeros(Float64, Nbins_occ, Norbit)
+
+    # Per-thread RNGs: seed offset by thread id so results are deterministic
+    # but independent across threads.
+    nthreads = Threads.nthreads()
+    rngs = [MersenneTwister(0x5eed1234 + UInt(t)) for t in 1:nthreads]
+
+    # Atomic counter so we can report how many orbits were actually filled
+    filled_atomic = Threads.Atomic{Int}(0)
+
+    # ---------------------------------------------------------------
+    # PARALLEL ORBIT GENERATION
+    #   Each iteration owns exactly one column (c_claim).
+    #   Shell index and Lfrac are derived deterministically from c_claim
+    #   so there is no shared mutable counter to race on.
+    # ---------------------------------------------------------------
+    Threads.@threads for c_claim in 1:Norbit
+
+        tid  = Threads.threadid()
+        rng  = rngs[tid]
+
+        # Deterministic shell / Lfrac selection (replaces the old shared idx_local)
+        idx_local = mod1(c_claim, Nshells)
+        rapo      = f64(shells[idx_local])
+        !(isfinite(rapo) && rapo > 0.0) && continue
+
+        lf      = Lfrac[1 + ((c_claim - 1) % length(Lfrac))]
+        r0_frac = 0.95 + 0.04 * rand(rng)
+
+        ic, Lz0, E0, vc, st = launch_orbit_apocenter(
+            rapo     = rapo,
+            theta0   = theta0,
+            Lz_frac  = f64(lf),
+            pot      = ctx.pot,
+            frc      = ctx.frc,
+            r0_frac  = r0_frac,
+            dt_frac  = dt_frac_orbit,
+        )
+        st != :ok && continue
+
+        r, vr, theta = integrate_orbit_rk4(
+            ic        = ic,
+            xLz       = Lz0,
+            orbit_ctx = orbit_ctx,
+            nsteps    = nsteps,
+        )
+        isempty(r) && continue
+
+        Nhits    = length(r)
+        s_arr    = Vector{Float64}(undef, Nhits)
+        vphi_arr = Vector{Float64}(undef, Nhits)
+
+        @inbounds for i in 1:Nhits
+            si          = _ssin(f64(theta[i]))
+            ri          = f64(r[i])
+            s_arr[i]    = ri * si
+            vphi_arr[i] = f64(Lz0) / (ri * si)
+        end
+
+        # ---- occupancy column ----
+        col_occ = zeros(Float64, Nbins_occ)
+        if return_occ && Nhits > 0
+            @inbounds for j in 1:Nbins_occ
+                lo  = occ_edges[j]
+                hi  = occ_edges[j + 1]
+                cnt = 0
+                @inbounds for x in s_arr
+                    cnt += (x >= lo && x < hi) ? 1 : 0
+                end
+                col_occ[j] = cnt / Nhits
+            end
+        end
+
+        # ---- vlos column ----
+        col_vlos = zeros(Float64, Nvlos)
+        if Nvlos > 0
+            vlos_arr    = @. sini * f64(vr) + cosi * vphi_arr
+            pidx        = sortperm(s_arr)
+            s_sorted    = s_arr[pidx]
+            vlos_sorted = vlos_arr[pidx]
+            inv_sqrt2pi = inv(sqrt(2 * pi))
+
+            @inbounds for row in 1:Nvlos
+                istar = vlos_idx[row]
+                Ri    = f64(R_star_m[istar])
+                vi    = f64(v_star_mps[istar])
+                si    = f64(verr_star_mps[istar])
+                s2    = si * si
+                if !(isfinite(s2) && s2 > 0.0)
+                    col_vlos[row] = 0.0
+                    continue
+                end
+                dR = max(dR_frac * Ri, 1e-12)
+                lo = Ri - dR
+                hi = Ri + dR
+                j0 = searchsortedfirst(s_sorted, lo)
+                j1 = searchsortedlast(s_sorted,  hi)
+                if j1 < j0
+                    col_vlos[row] = 0.0
+                    continue
+                end
+                p        = 0.0
+                nhit     = j1 - j0 + 1
+                inv_norm = inv_sqrt2pi / si
+                @inbounds for j in j0:j1
+                    dv = vi - vlos_sorted[j]
+                    p += exp(-0.5 * (dv * dv) / s2)
+                end
+                col_vlos[row] = (p * inv_norm) / nhit
+            end
+        end
+
+        # ---- write columns — each c_claim is unique, no data race ----
+        @inbounds A_vlos[:, c_claim] .= col_vlos
+        @inbounds A_occ[:,  c_claim] .= col_occ
+
+        Threads.atomic_add!(filled_atomic, 1)
+    end  # end Threads.@threads
+
+    filled = filled_atomic[]
+    filled < Norbit && println("WARNING: build_A_matrix_hybrid filled ", filled, " / ", Norbit)
+
+    A = return_occ ? vcat(A_vlos, A_occ) : A_vlos
+    return diag ? (A, Dict("filled" => filled, "attempts" => Norbit)) : A
+end
+
+# ==============================================================
+# Stellar log-likelihood (exact port of Python stellar_log_likelihood)
+# No rescaling, no approximations.
+# A      : (Nstar, Norbit) likelihood matrix
+# w      : (Norbit,) orbit weights
+# verr   : (Nstar,) velocity errors [m/s]
+# rv_mask: (Nstar,) Bool — which stars have vlos
+# returns scalar log-likelihood
+# ==============================================================
+function stellar_log_likelihood_jl(
+        A::Matrix{Float64},
+        w::Vector{Float64},
+        verr::Vector{Float64};
+        rv_mask::Union{Vector{Bool},Nothing}=nothing,
+        lambda_occ::Float64=0.0,
+        Nocc::Int=0,
+        eps::Float64=1e-300,
+        sigma_floor_mps::Float64=2e3)
+
+    Nstar = size(A, 1) - Nocc
+    p = A * w
+    ll = 0.0
+
+    if Nstar > 0
+        mask = rv_mask !== nothing ? rv_mask : convert(Vector{Bool}, trues(Nstar))
+        @inbounds for i in 1:Nstar
+            mask[i] || continue
+            sig = max(verr[i], sigma_floor_mps)
+            pv  = max(p[i] * sig, eps)
+            ll += log(pv)
+        end
+    end
+
+    if Nocc > 0
+        @inbounds for i in (Nstar+1):(Nstar+Nocc)
+            ll += lambda_occ * log(max(p[i], eps))
+        end
+    end
+
+    return ll
+end
+
+
+# ==============================================================
+# Weight solver — exact port of Python solve_weights_stellar.
+# Uses Optim.jl Fminbox(LBFGS()) = bounded L-BFGS-B.
+# No row rescaling (the Python rescaling was a bug).
+# Returns (w_normed, ok::Bool)
+# ==============================================================
+function solve_weights_stellar_jl(
+        A::Matrix{Float64},
+        verr::Vector{Float64};
+        rv_mask::Union{Vector{Bool},Nothing}=nothing,
+        Nocc::Int=0,
+        lambda_occ::Float64=0.0,
+        alpha::Float64=1e-2,
+        maxiter::Int=500,
+        eps::Float64=1e-300,
+        sigma_floor_mps::Float64=2e3,
+        seed::UInt=UInt(0))
+
+    Nstar  = size(A, 1) - Nocc
+    Norbit = size(A, 2)
+    Norbit <= 0 && return (zeros(Float64, 0), false)
+
+    # scale regularization with problem size (matches Python)
+    alpha_eff = alpha * (Norbit / 200.0) * (max(Nstar, 1) / 90.0)
+
+    # initial weights — small uniform + noise (matches Python rng behaviour)
+    rng = MersenneTwister(seed)
+    w0  = rand(rng, Norbit) .+ 1e-3
+    w0 ./= sum(w0)
+
+    mask = rv_mask !== nothing ? rv_mask : trues(Nstar)
+
+    # objective: negative log-likelihood + L2 regularization
+    function obj(w::Vector{Float64})
+        ll = stellar_log_likelihood_jl(
+            A, w, verr;
+            rv_mask=mask,
+            lambda_occ=lambda_occ,
+            Nocc=Nocc,
+            eps=eps,
+            sigma_floor_mps=sigma_floor_mps,
+        )
+        return -ll + alpha_eff * dot(w, w)
+    end
+
+    # gradient via ForwardDiff-style finite diff — Optim handles this automatically
+    # with LBFGS when no gradient is provided, but we can also use autodiff
+    lo = zeros(Float64, Norbit)
+    hi = fill(Inf,      Norbit)
+
+    local result
+    try
+        result = Optim.optimize(
+            obj,
+            lo, hi, w0,
+            Optim.Fminbox(Optim.LBFGS()),
+            Optim.Options(
+                iterations        = maxiter,
+                f_calls_limit     = 20000,
+                g_tol             = 1e-6,
+                show_trace        = false,
+                allow_f_increases = false,
+            )
+        )
+    catch
+        return (zeros(Float64, Norbit), false)
+    end
+
+    w = max.(Optim.minimizer(result), 0.0)
+    s = sum(w)
+    (!isfinite(s) || s <= 0.0) && return (zeros(Float64, Norbit), false)
+
+    return (w ./ s, true)
+end
+
+
+# ==============================================================
+# Updated evaluate_batch_theta
+# Julia builds all A matrices in parallel (@threads over batch),
+# then solves weights and computes chi2_red — all in Julia.
+# Python gets back (status::Vector{Int}, chi2::Vector{Float64})
+# status: 0=pass, 1=A_fail, 2=weights_fail, 3=exception
+# ==============================================================
+function evaluate_batch_theta(
+        thetas::AbstractMatrix{<:Real},
+        R_star_m::Vector{Float64},
+        valid_vlos::AbstractVector{Bool},
+        v_star_mps::Vector{Float64},
+        verr_star_mps::Vector{Float64},
+        sini::Float64,
+        Norbit::Int,
+        halo_type::String;
+        Nocc::Int=0,
+        lambda_occ::Float64=0.0,
+        alpha::Float64=1e-2,
+        maxiter::Int=500)
+
+    nrow, nbatch = size(thetas)
+
+    R_valid  = R_star_m[valid_vlos]
+    v_valid  = v_star_mps[valid_vlos]
+    ve_valid = verr_star_mps[valid_vlos]
+    Nvalid   = length(R_valid)
+    nu       = max(count(valid_vlos) - 3, 1)
+    rv_mask = convert(Vector{Bool}, trues(Nvalid))
+
     status = Vector{Int}(undef, nbatch)
     chi2   = Vector{Float64}(undef, nbatch)
+
     Threads.@threads for i in 1:nbatch
-        th = getth(i)
         try
-            rho_s = th[1]
-            r_s   = th[2]
-            MBH   = dim >= 3 ? th[3] : 0.0
-            A = build_A_matrix_julia((pi/2,), 0.0, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type)
-            m = size(A, 1)
-            if length(d) != m || length(w2) != m
+            rho_s = Float64(thetas[1, i])
+            r_s   = Float64(thetas[2, i])
+            MBH   = nrow >= 3 ? Float64(thetas[3, i]) : 0.0
+
+            # build A matrix with real v and verr
+            A = build_A_matrix_stellar(
+                Norbit, R_valid, v_valid, ve_valid,
+                sini, rho_s, r_s, MBH, halo_type;
+                return_occ=false,
+            )
+
+            m, n = size(A)
+            if m == 0 || n == 0 || !all(isfinite, A)
                 status[i] = 1
                 chi2[i]   = Inf
                 continue
             end
-            x = _nnls_wls_pg!(A, d, w2)
-            Ax = A * x
-            s = 0.0
-            dof = max(m - count(>(0.0), x), 1)
-            @inbounds for k in 1:m
-                rk = Ax[k] - d[k]
-                s += w2[k] * rk * rk
+
+            # solve weights — L-BFGS-B, no rescaling
+            w, ok = solve_weights_stellar_jl(
+                A, ve_valid;
+                rv_mask=rv_mask,
+                Nocc=Nocc,
+                lambda_occ=lambda_occ,
+                alpha=alpha,
+                maxiter=maxiter,
+                seed=UInt(i),
+            )
+
+            if !ok
+                status[i] = 2
+                chi2[i]   = Inf
+                continue
             end
-            v = s / dof
-            if isfinite(v)
+
+            # log-likelihood → chi2_red (matches Python exactly)
+            ll = stellar_log_likelihood_jl(
+                A, w, ve_valid;
+                rv_mask=rv_mask,
+                lambda_occ=lambda_occ,
+                Nocc=Nocc,
+            )
+
+            val = -2.0 * ll / nu
+            if isfinite(val)
                 status[i] = 0
-                chi2[i]   = v
+                chi2[i]   = val
             else
                 status[i] = 2
                 chi2[i]   = Inf
             end
-        catch
+
+        catch e
             status[i] = 3
             chi2[i]   = Inf
+            @warn "evaluate_batch_theta exception on i=$i" exception=(e, catch_backtrace())
+            @debug "evaluate_batch_theta exception details" exception=(e, catch_backtrace())
         end
     end
+
     return status, chi2
 end
 end
