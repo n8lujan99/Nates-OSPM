@@ -1,17 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# push — developer push (PC only)
-
-HOST="$(hostname)"
-
-if [[ "$HOST" == *login* || "$HOST" == *ls6* || -n "${SLURM_JOB_ID:-}" ]]; then
-    echo "[push] Refusing: pushes from cluster environments are not allowed."
-    exit 1
-fi
-
-REPO_ROOT="$(git rev-parse --show-toplevel)" || {
-    echo "[push] Not inside a git repo."
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    echo "[push] Not inside a git repository."
     exit 1
 }
 
@@ -27,10 +18,15 @@ git status --short
 echo
 
 read -rp "[push] Commit message: " MSG
-[[ -z "$MSG" ]] && { echo "Empty message."; exit 1; }
+[[ -z "$MSG" ]] && { echo "Empty commit message"; exit 1; }
 
 git add -A
-git commit -m "$MSG"
+
+if git diff --cached --quiet; then
+    echo "[push] Nothing to commit."
+else
+    git commit -m "$MSG"
+fi
 
 git push origin main
 
