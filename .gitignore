@@ -24,6 +24,7 @@ Data/Gal_Profiles/**/logs/
 .julia_dist/
 .julia/
 .julia_logs/
+.CondaPkg/
 
 # ===============================
 # Slurm output (repo root)
