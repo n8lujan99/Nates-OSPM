@@ -3,6 +3,8 @@
 # that way other modules can remain Galaxy-agnostic
 from pathlib import Path
 import pathlib
+import os
+import multiprocessing as mp
 from Data.Data_Prep.Data_Paths import build_data_paths
 
 
@@ -14,13 +16,19 @@ PROFILE_ROOT = Path(__file__).resolve().parent
 if not PROFILE_ROOT.exists():
     raise FileNotFoundError(f"PROFILE_ROOT does not exist: {PROFILE_ROOT}")
 
+def detect_workers():
+    slurm = os.getenv("SLURM_CPUS_PER_TASK")
+    if slurm and slurm.isdigit():
+        return int(slurm)
+    return mp.cpu_count()
+
+WORKERS = detect_workers()
 
 CONFIG = {
     # =========================================================
     # Parallelization 
     # =========================================================
-    "N_WORKERS": 26, # Equal to the number of CPU cores available 
-
+    "N_WORKERS": WORKERS,
 
     # =========================================================
     # Identity
@@ -63,7 +71,7 @@ CONFIG = {
     # =========================================================
     # OSPM numerical setup
     # =========================================================
-    "NORBIT":              1000, 
+    "NORBIT":              2500, 
     "BINNING": {
         "MIN_BINS":            5,
         "N_TARGET_CIRC":       5,
@@ -106,7 +114,7 @@ CONFIG = {
     # =========================================================
     # Sampling & control
     # =========================================================
-    "BATCH_SIZE":          26,
+    "BATCH_SIZE":          WORKERS,
     "MIN_BATCH_SIZE":      8,
     "MAX_BATCH_SIZE":      256,
     "_PRINT_EVERY":        5,
@@ -136,7 +144,7 @@ CONFIG = {
     "MAX_RUNS":              10000,
     "STOP_NO_IMPROVEMENT":   500,
     "IMPROVEMENT_EPSILON":   1e-6,
-    "LOG_INTERVAL":          10, # Make larger on cluster
+    "LOG_INTERVAL":          100,
 
     # =========================================================
     # Constants
