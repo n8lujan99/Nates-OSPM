@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# push_deck — cluster safe deck push
+
+HOST="$(hostname)"
+
+if [[ "$HOST" != *login* && -z "${SLURM_JOB_ID:-}" ]]; then
+    echo "[push_deck] Refusing: not running on cluster."
+    exit 1
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+git pull --rebase origin main
+
+echo "[push_deck] staging daemon decks"
+
+git add Data/Gal_Profiles/*/default/daemon_deck.csv
+
+if git diff --cached --quiet; then
+    echo "[push_deck] nothing to push"
+    exit 0
+fi
+
+git commit -m "Update daemon deck from cluster run"
+
+git push origin main
+
+echo "[push_deck] deck pushed"

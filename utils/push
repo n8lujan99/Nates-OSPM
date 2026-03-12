@@ -1,41 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================================================
-# push — Commit and push changes to GitHub
-#
-# Safety rules:
-#   - Only allowed for repo owner
-#   - Never allowed on cluster / Slurm
-#   - Stages all changes explicitly
-# ============================================================
+# push — developer push (PC only)
 
-# ----------------------------
-# Identity guard
-# ----------------------------
-ALLOWED_USER="nate"
-
-if [[ "$(whoami)" != "$ALLOWED_USER" ]]; then
-    echo "[push] Refusing: user $(whoami) is not allowed to push."
-    exit 1
-fi
-
-# ----------------------------
-# Environment guard (cluster)
-# ----------------------------
 HOST="$(hostname)"
 
-if [[ "$HOST" == *ls6* || "$HOST" == *login* || -n "${SLURM_JOB_ID:-}" ]]; then
+if [[ "$HOST" == *login* || "$HOST" == *ls6* || -n "${SLURM_JOB_ID:-}" ]]; then
     echo "[push] Refusing: pushes from cluster environments are not allowed."
-    echo "[push] Host: $HOST"
     exit 1
 fi
 
-# ----------------------------
-# Resolve repo root
-# ----------------------------
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-    echo "[push] Not inside a git repository."
+REPO_ROOT="$(git rev-parse --show-toplevel)" || {
+    echo "[push] Not inside a git repo."
     exit 1
 }
 
@@ -45,50 +21,17 @@ echo "[push] Repo root: $REPO_ROOT"
 echo "[push] Branch: $(git branch --show-current)"
 echo
 
-# ----------------------------
-# Show current changes
-# ----------------------------
-echo "[push] Changes to be committed:"
+git pull --rebase origin main
+
 git status --short
 echo
 
-# ----------------------------
-# Stage everything
-# ----------------------------
-echo "[push] Staging all changes"
-git add -A
-
-# ----------------------------
-# Check if anything is staged
-# ----------------------------
-if git diff --cached --quiet; then
-    echo "[push] Nothing to commit."
-    exit 0
-fi
-
-# ----------------------------
-# Commit message
-# ----------------------------
 read -rp "[push] Commit message: " MSG
-if [[ -z "$MSG" ]]; then
-    echo "[push] Aborted: empty commit message."
-    exit 1
-fi
+[[ -z "$MSG" ]] && { echo "Empty message."; exit 1; }
 
+git add -A
 git commit -m "$MSG"
 
-# ----------------------------
-# Optional SSH sanity check
-# ----------------------------
-echo
-echo "[push] Checking SSH access to GitHub (non-fatal)..."
-ssh -T git@github.com || true
-echo
-
-# ----------------------------
-# Push
-# ----------------------------
-echo "[push] Pushing to origin..."
-git push origin HEAD
+git push origin main
 
 echo "[push] Done."
