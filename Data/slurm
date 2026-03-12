@@ -5,8 +5,8 @@
 #SBATCH -p anantuabhg
 #SBATCH -A anantuabhg
 #SBATCH -N 1
-#SBATCH --ntasks=80
-#SBATCH --cpus-per-task=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=80
 #SBATCH -t 24:00:00
 
 set -euo pipefail
@@ -14,7 +14,7 @@ set -euo pipefail
 echo "===== SLURM ENVIRONMENT ====="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $(hostname)"
-echo "CPUs allocated: $SLURM_CPUS_PER_TASK"
+echo "CPUs allocated: $SLURM_CPUS_ON_NODE"
 echo "Start time: $(date)"
 echo "============================="
 
