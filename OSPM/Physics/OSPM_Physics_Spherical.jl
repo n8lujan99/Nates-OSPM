@@ -678,26 +678,11 @@ end
 # ==============================================================
 # Production chi^2 evaluation (same call signature, parallel-safe)
 # ==============================================================
-function build_A_matrix_hybrid(
-        Norbit::Int,
-        R_star_m::Vector{Float64},
-        has_vlos::AbstractVector{Bool},
-        v_star_mps::Vector{Float64},
-        verr_star_mps::Vector{Float64},
-        sini::Float64,
-        rho_s::Float64,
-        r_s::Float64,
-        MBH::Float64,
-        halo_type::String;
-        nsteps::Int=4000,
-        Lfrac::NTuple{5,Float64}=(0.05, 0.2, 0.4, 0.7, 1.0),
-        dt_frac_orbit::Float64=0.01,
-        dR_frac::Float64=0.05,
-        dR_floor_frac::Float64=0.01,
-        dR_floor_pc::Float64=0.0,
-        Nbins_occ::Int=6,
-        return_occ::Bool=true,
-        max_attempts_factor::Int=60,
+function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64},
+        verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64,
+        halo_type::String; nsteps::Int=4000, Lfrac::NTuple{5,Float64}=(0.05, 0.2, 0.4, 0.7, 1.0),
+        dt_frac_orbit::Float64=0.01, dR_frac::Float64=0.05, dR_floor_frac::Float64=0.01,
+        dR_floor_pc::Float64=0.0, Nbins_occ::Int=6, return_occ::Bool=true, max_attempts_factor::Int=60,
         diag::Bool=false)
 
     Nstar = length(R_star_m)
@@ -735,33 +720,42 @@ function build_A_matrix_hybrid(
     A_vlos = zeros(Float64, Nvlos,    Norbit)
     A_occ  = zeros(Float64, Nbins_occ, Norbit)
 
-    # Per-thread RNGs: seed offset by thread id so results are deterministic
-    # but independent across threads.
+    # Per-thread RNGs
     nthreads = Threads.nthreads()
     rngs = [MersenneTwister(0x5eed1234 + UInt(t)) for t in 1:nthreads]
 
+    next_orbit = Threads.Atomic{Int}(1)
     # Atomic counter so we can report how many orbits were actually filled
     filled_atomic = Threads.Atomic{Int}(0)
-
+    
     # ---------------------------------------------------------------
     # PARALLEL ORBIT GENERATION
     #   Each iteration owns exactly one column (c_claim).
     #   Shell index and Lfrac are derived deterministically from c_claim
     #   so there is no shared mutable counter to race on.
     # ---------------------------------------------------------------
-    Threads.@threads for c_claim in 1:Norbit
+    Threads.@threads for _ in 1:Threads.nthreads()
 
         tid  = Threads.threadid()
         rng  = rngs[tid]
 
-        # Deterministic shell / Lfrac selection (replaces the old shared idx_local)
-        idx_local = mod1(c_claim, Nshells)
-        rapo      = f64(shells[idx_local])
-        !(isfinite(rapo) && rapo > 0.0) && continue
+        col_occ  = zeros(Float64, Nbins_occ)
+        col_vlos = zeros(Float64, Nvlos)
 
-        lf      = Lfrac[1 + ((c_claim - 1) % length(Lfrac))]
-        r0_frac = 0.95 + 0.04 * rand(rng)
+        s_arr    = Float64[]
+        vphi_arr = Float64[]
 
+        while true
+
+            c_claim = Threads.atomic_add!(next_orbit, 1)
+            c_claim > Norbit && break
+
+            idx_local = mod1(c_claim, Nshells)
+            rapo      = f64(shells[idx_local])
+            !(isfinite(rapo) && rapo > 0.0) && continue
+
+            lf      = Lfrac[1 + ((c_claim - 1) % length(Lfrac))]
+            r0_frac = 0.95 + 0.04 * rand(rng)
         ic, Lz0, E0, vc, st = launch_orbit_apocenter(
             rapo     = rapo,
             theta0   = theta0,
@@ -782,8 +776,8 @@ function build_A_matrix_hybrid(
         isempty(r) && continue
 
         Nhits    = length(r)
-        s_arr    = Vector{Float64}(undef, Nhits)
-        vphi_arr = Vector{Float64}(undef, Nhits)
+        resize!(s_arr,Nhits)
+        resize!(vphi_arr,Nhits)
 
         @inbounds for i in 1:Nhits
             si          = _ssin(f64(theta[i]))
@@ -792,8 +786,10 @@ function build_A_matrix_hybrid(
             vphi_arr[i] = f64(Lz0) / (ri * si)
         end
 
+        fill!(col_occ,0.0)
+        fill!(col_vlos,0.0)
+
         # ---- occupancy column ----
-        col_occ = zeros(Float64, Nbins_occ)
         if return_occ && Nhits > 0
             @inbounds for j in 1:Nbins_occ
                 lo  = occ_edges[j]
@@ -807,7 +803,6 @@ function build_A_matrix_hybrid(
         end
 
         # ---- vlos column ----
-        col_vlos = zeros(Float64, Nvlos)
         if Nvlos > 0
             vlos_arr    = @. sini * f64(vr) + cosi * vphi_arr
             pidx        = sortperm(s_arr)
@@ -850,11 +845,10 @@ function build_A_matrix_hybrid(
         @inbounds A_occ[:,  c_claim] .= col_occ
 
         Threads.atomic_add!(filled_atomic, 1)
-    end  # end Threads.@threads
-
+        end
+    end
     filled = filled_atomic[]
     filled < Norbit && println("WARNING: build_A_matrix_hybrid filled ", filled, " / ", Norbit)
-
     A = return_occ ? vcat(A_vlos, A_occ) : A_vlos
     return diag ? (A, Dict("filled" => filled, "attempts" => Norbit)) : A
 end
