@@ -1,50 +1,43 @@
 #!/bin/bash
-#SBATCH -J Draco_Runs
-#SBATCH -o logs/draco_%j.out
-#SBATCH -e logs/draco_%j.err
+#SBATCH -J OSPM_Run
+#SBATCH -o logs/OSPM_%j.out
+#SBATCH -e logs/OSPM_%j.err
 #SBATCH -p anantuabhg
 #SBATCH -A anantuabhg
 #SBATCH -N 1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH -t 24:00:00
-
 set -euo pipefail
-
+GALAXY="${OSPM_GALAXY:-unknown}"
 echo "===== SLURM ENVIRONMENT ====="
+echo "Galaxy: $GALAXY"
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $(hostname)"
-echo "CPUs allocated: $SLURM_CPUS_ON_NODE"
+echo "CPUs allocated: $SLURM_CPUS_PER_TASK"
 echo "Start time: $(date)"
 echo "============================="
-
-cd /work/mez653/Nates-OSPM
-mkdir -p logs
-
+cd "$OSPM_REPO_ROOT"
+mkdir -p logs/$GALAXY
+exec > >(tee logs/$GALAXY/${GALAXY}_${SLURM_JOB_ID}.out)
+exec 2> >(tee logs/$GALAXY/${GALAXY}_${SLURM_JOB_ID}.err >&2)
 module purge
 module load julia/1.10.9
-
 source .venv-draco/bin/activate
-
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export JULIA_NUM_THREADS=$SLURM_CPUS_PER_TASK
-
 export PYTHONUNBUFFERED=1
 export PYTHON_JULIACALL_HANDLE_SIGNALS=yes
 export PYJULIA_USE_PYTHONCALL=1
 export OSPM_USE_JULIA=1
-
-export JULIA_PROJECT=/work/mez653/Nates-OSPM
+export JULIA_PROJECT="$OSPM_REPO_ROOT"
 export PYTHON_JULIACALL_EXE=/apps/julia/1.10.9/bin/julia
-
 echo "Python: $(which python)"
 python --version
-
 echo "Julia: $(which julia)"
-julia --project=/work/mez653/Nates-OSPM -e 'using Pkg; println("Julia threads: ", Threads.nthreads()); println("Julia project: ", Base.active_project())'
-
+julia --project="$OSPM_REPO_ROOT" -e 'using Pkg; println("Julia threads: ", Threads.nthreads()); println("Julia project: ", Base.active_project())'
 echo "PYTHON_JULIACALL_EXE=$PYTHON_JULIACALL_EXE"
 echo "JULIA_PROJECT=$JULIA_PROJECT"
 echo "Launching OSPM..."
@@ -55,5 +48,4 @@ print("cwd:", os.getcwd())
 print("venv python:", os.popen("which python").read().strip())
 EOF
 bash utils/start
-
 echo "End time: $(date)"
