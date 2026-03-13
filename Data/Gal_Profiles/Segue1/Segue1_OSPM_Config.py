@@ -38,7 +38,7 @@ CONFIG = {
     "PA_DEG":           None,
     "AXIS_RATIO_Q":     1.0,
     "R_HALF_LIGHT_PC":  29.0,
-    "R_MAX_STARS_PC":   145.0,
+    "R_MAX_STARS_PC":   120.0,
 
     # Viewing geometry
     "INCLINATION_DEG":  90.0,
@@ -62,7 +62,7 @@ CONFIG = {
     # OSPM numerical setup
     # =========================================================
 
-    "NORBIT":              2000,   # RESOLUTION
+    "NORBIT":              2500,   # RESOLUTION
     "BINNING": {
         "MIN_BINS":            4,
         "N_TARGET_CIRC":       5,
@@ -73,7 +73,7 @@ CONFIG = {
     # Parameter space
     # =========================================================
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA":   [0.1, 2.0, 50000],
+    "INITIAL_THETA":   [0.05, 50.0, 200000],
     "THETA_BOUNDS": [
         (1e-4, 100.0),     # rho_s
         (5, 5000.0),    # r_s
@@ -104,17 +104,17 @@ CONFIG = {
     # =========================================================
     # Sampling & control
     # =========================================================
-    "BATCH_SIZE":          64,
-    "MIN_BATCH_SIZE":      64,
+    "BATCH_SIZE":          80,
+    "MIN_BATCH_SIZE":      80,
     "MAX_BATCH_SIZE":      256,
     "_PRINT_EVERY":        10,
-    "_print_counter":      4,
+    "_print_counter":      1,
 
     # =========================================================
     # AI / learning
     # =========================================================
-    "AI_START_AFTER":        500,
-    "MIN_TRAIN_POINTS":      500,
+    "AI_START_AFTER":        300,
+    "MIN_TRAIN_POINTS":      300,
     "TRAIN_WINDOW":          500,
     "AI_NOISE_INIT":         0.30,
     "AI_NOISE_MIN":          0.02,
