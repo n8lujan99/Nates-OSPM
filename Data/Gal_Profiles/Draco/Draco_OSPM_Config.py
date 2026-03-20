@@ -7,9 +7,7 @@ import os
 import multiprocessing as mp
 from Data.Data_Prep.Data_Paths import build_data_paths
 
-
 Galaxy = "Draco"
-
 
 # Paths need to be specified in Data_Paths.py sticking to the following convention:
 PROFILE_ROOT = Path(__file__).resolve().parent
