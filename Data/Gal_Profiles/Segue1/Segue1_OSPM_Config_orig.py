@@ -25,11 +25,11 @@ CONFIG = {
 
     # Parameter space
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA":   [0.1, 8.0, 50000.0],
+    "INITIAL_THETA":   [60, 2500.0, 8.5e5],
     "THETA_BOUNDS": [
-        (1e-3, 10.0),
-        (1.0, 300),
-        (0, 1e6),
+        (15.0, 100.0),
+        (800.0, 5000.0),
+        (6.5e5, 1.05e6),
     ],
 
     # Data-generation metadata

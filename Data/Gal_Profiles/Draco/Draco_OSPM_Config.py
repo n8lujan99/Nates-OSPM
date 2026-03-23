@@ -57,18 +57,13 @@ CONFIG = {
 
     # =========================================================
     # Parameter space — UPDATED (Draco tuned box)
-    # =========================================================
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-
-    # shifted toward live basin + BH upper region
     "INITIAL_THETA": [6.5, 3300.0, 8.8e5],
-
     "THETA_BOUNDS": [
-        (2.0, 10.0),        # rho_s  → remove dead low-density region
-        (1800.0, 5000.0),   # r_s    → keep broad trough, trim small side
-        (5.5e5, 1.10e6),    # MBH    → shift upward, keep cluster + slope
-    ],
-
+       (2.0, 10.0),      # rho_s  → high-density basin only
+       (1800.0, 5000.0),    # r_s    → keep basin width
+       (5.5e5, 1.10e6),    # MBH    → upper cluster region
+],
     "PEN_SPHERE_STRENGTH": 200,
     "PEN_SPHERE_POWER":    2.0,
     "PEN_SLOPE_STRENGTH":  5000,
