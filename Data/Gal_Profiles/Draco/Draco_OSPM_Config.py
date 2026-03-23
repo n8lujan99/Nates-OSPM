@@ -58,11 +58,11 @@ CONFIG = {
     # =========================================================
     # Parameter space — UPDATED (Draco tuned box)
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA": [6.5, 3300.0, 8.8e5],
+    "INITIAL_THETA": [3, 1500.0, 9e5],
     "THETA_BOUNDS": [
-       (2.0, 10.0),      # rho_s  → high-density basin only
-       (1800.0, 5000.0),    # r_s    → keep basin width
-       (5.5e5, 1.10e6),    # MBH    → upper cluster region
+       (2.0, 15.0),      # rho_s  → high-density basin only
+       (1800.0, 8000.0),    # r_s    → keep basin width
+       (5.5e5, 5e6),    # MBH    → upper cluster region
 ],
     "PEN_SPHERE_STRENGTH": 200,
     "PEN_SPHERE_POWER":    2.0,
