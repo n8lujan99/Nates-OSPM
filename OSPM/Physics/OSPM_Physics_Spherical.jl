@@ -720,20 +720,20 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
     A_vlos = zeros(Float64, Nvlos,    Norbit)
     A_occ  = zeros(Float64, Nbins_occ, Norbit)
 
+    # =========================
+    # NEW: diagnostics tracking
+    # =========================
+    success_flags = falses(Norbit)
+    min_r_reached = fill(Inf, Norbit)
+    rapo_list     = fill(NaN, Norbit)
+
     # Per-thread RNGs
     nthreads = Threads.nthreads()
     rngs = [MersenneTwister(0x5eed1234 + UInt(t)) for t in 1:nthreads]
 
     next_orbit = Threads.Atomic{Int}(1)
-    # Atomic counter so we can report how many orbits were actually filled
     filled_atomic = Threads.Atomic{Int}(0)
-    
-    # ---------------------------------------------------------------
-    # PARALLEL ORBIT GENERATION
-    #   Each iteration owns exactly one column (c_claim).
-    #   Shell index and Lfrac are derived deterministically from c_claim
-    #   so there is no shared mutable counter to race on.
-    # ---------------------------------------------------------------
+
     Threads.@threads for _ in 1:Threads.nthreads()
 
         tid  = Threads.threadid()
@@ -756,99 +756,142 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
 
             lf      = Lfrac[1 + ((c_claim - 1) % length(Lfrac))]
             r0_frac = 0.95 + 0.04 * rand(rng)
-        ic, Lz0, E0, vc, st = launch_orbit_apocenter(
-            rapo     = rapo,
-            theta0   = theta0,
-            Lz_frac  = f64(lf),
-            pot      = ctx.pot,
-            frc      = ctx.frc,
-            r0_frac  = r0_frac,
-            dt_frac  = dt_frac_orbit,
-        )
-        st != :ok && continue
 
-        r, vr, theta = integrate_orbit_rk4(
-            ic        = ic,
-            xLz       = Lz0,
-            orbit_ctx = orbit_ctx,
-            nsteps    = nsteps,
-        )
-        isempty(r) && continue
+            ic, Lz0, E0, vc, st = launch_orbit_apocenter(
+                rapo     = rapo,
+                theta0   = theta0,
+                Lz_frac  = f64(lf),
+                pot      = ctx.pot,
+                frc      = ctx.frc,
+                r0_frac  = r0_frac,
+                dt_frac  = dt_frac_orbit,
+            )
+            st != :ok && continue
 
-        Nhits    = length(r)
-        resize!(s_arr,Nhits)
-        resize!(vphi_arr,Nhits)
+            r, vr, theta = integrate_orbit_rk4(
+                ic        = ic,
+                xLz       = Lz0,
+                orbit_ctx = orbit_ctx,
+                nsteps    = nsteps,
+            )
 
-        @inbounds for i in 1:Nhits
-            si          = _ssin(f64(theta[i]))
-            ri          = f64(r[i])
-            s_arr[i]    = ri * si
-            vphi_arr[i] = f64(Lz0) / (ri * si)
-        end
+            isempty(r) && continue
 
-        fill!(col_occ,0.0)
-        fill!(col_vlos,0.0)
+            # =========================
+            # NEW: record diagnostics
+            # =========================
+            success_flags[c_claim] = true
+            rapo_list[c_claim]     = rapo
+            min_r_reached[c_claim] = minimum(r)
 
-        # ---- occupancy column ----
-        if return_occ && Nhits > 0
-            @inbounds for j in 1:Nbins_occ
-                lo  = occ_edges[j]
-                hi  = occ_edges[j + 1]
-                cnt = 0
-                @inbounds for x in s_arr
-                    cnt += (x >= lo && x < hi) ? 1 : 0
-                end
-                col_occ[j] = cnt / Nhits
+            Nhits    = length(r)
+            resize!(s_arr,Nhits)
+            resize!(vphi_arr,Nhits)
+
+            @inbounds for i in 1:Nhits
+                si          = _ssin(f64(theta[i]))
+                ri          = f64(r[i])
+                s_arr[i]    = ri * si
+                vphi_arr[i] = f64(Lz0) / (ri * si)
             end
-        end
 
-        # ---- vlos column ----
-        if Nvlos > 0
-            vlos_arr    = @. sini * f64(vr) + cosi * vphi_arr
-            pidx        = sortperm(s_arr)
-            s_sorted    = s_arr[pidx]
-            vlos_sorted = vlos_arr[pidx]
-            inv_sqrt2pi = inv(sqrt(2 * pi))
+            fill!(col_occ,0.0)
+            fill!(col_vlos,0.0)
 
-            @inbounds for row in 1:Nvlos
-                istar = vlos_idx[row]
-                Ri    = f64(R_star_m[istar])
-                vi    = f64(v_star_mps[istar])
-                si    = f64(verr_star_mps[istar])
-                s2    = si * si
-                if !(isfinite(s2) && s2 > 0.0)
-                    col_vlos[row] = 0.0
-                    continue
+            if return_occ && Nhits > 0
+                @inbounds for j in 1:Nbins_occ
+                    lo  = occ_edges[j]
+                    hi  = occ_edges[j + 1]
+                    cnt = 0
+                    @inbounds for x in s_arr
+                        cnt += (x >= lo && x < hi) ? 1 : 0
+                    end
+                    col_occ[j] = cnt / Nhits
                 end
-                dR = max(dR_frac * Ri, 1e-12)
-                lo = Ri - dR
-                hi = Ri + dR
-                j0 = searchsortedfirst(s_sorted, lo)
-                j1 = searchsortedlast(s_sorted,  hi)
-                if j1 < j0
-                    col_vlos[row] = 0.0
-                    continue
-                end
-                p        = 0.0
-                nhit     = j1 - j0 + 1
-                inv_norm = inv_sqrt2pi / si
-                @inbounds for j in j0:j1
-                    dv = vi - vlos_sorted[j]
-                    p += exp(-0.5 * (dv * dv) / s2)
-                end
-                col_vlos[row] = (p * inv_norm) / nhit
             end
-        end
 
-        # ---- write columns — each c_claim is unique, no data race ----
-        @inbounds A_vlos[:, c_claim] .= col_vlos
-        @inbounds A_occ[:,  c_claim] .= col_occ
+            if Nvlos > 0
+                vlos_arr    = @. sini * f64(vr) + cosi * vphi_arr
+                pidx        = sortperm(s_arr)
+                s_sorted    = s_arr[pidx]
+                vlos_sorted = vlos_arr[pidx]
+                inv_sqrt2pi = inv(sqrt(2 * pi))
 
-        Threads.atomic_add!(filled_atomic, 1)
+                @inbounds for row in 1:Nvlos
+                    istar = vlos_idx[row]
+                    Ri    = f64(R_star_m[istar])
+                    vi    = f64(v_star_mps[istar])
+                    si    = f64(verr_star_mps[istar])
+                    s2    = si * si
+                    if !(isfinite(s2) && s2 > 0.0)
+                        col_vlos[row] = 0.0
+                        continue
+                    end
+                    dR = max(dR_frac * Ri, 1e-12)
+                    lo = Ri - dR
+                    hi = Ri + dR
+                    j0 = searchsortedfirst(s_sorted, lo)
+                    j1 = searchsortedlast(s_sorted,  hi)
+                    if j1 < j0
+                        col_vlos[row] = 0.0
+                        continue
+                    end
+                    p        = 0.0
+                    nhit     = j1 - j0 + 1
+                    inv_norm = inv_sqrt2pi / si
+                    @inbounds for j in j0:j1
+                        dv = vi - vlos_sorted[j]
+                        p += exp(-0.5 * (dv * dv) / s2)
+                    end
+                    col_vlos[row] = (p * inv_norm) / nhit
+                end
+            end
+
+            @inbounds A_vlos[:, c_claim] .= col_vlos
+            @inbounds A_occ[:,  c_claim] .= col_occ
+
+            Threads.atomic_add!(filled_atomic, 1)
         end
     end
+
     filled = filled_atomic[]
-    filled < Norbit && println("WARNING: build_A_matrix_hybrid filled ", filled, " / ", Norbit)
+
+    # =========================
+    # NEW: enhanced warning
+    # =========================
+    if filled < Norbit
+        missing = Norbit - filled
+        Rmed = median(R_star_m)
+
+        inner_fail = 0
+        outer_fail = 0
+
+        for i in 1:Norbit
+            if !success_flags[i]
+                rmin_i = min_r_reached[i]
+                if !isfinite(rmin_i)
+                    rmin_i = rapo_list[i]
+                end
+
+                if isfinite(rmin_i)
+                    if rmin_i < Rmed
+                        inner_fail += 1
+                    else
+                        outer_fail += 1
+                    end
+                end
+            end
+        end
+
+        println(
+            "WARNING: build_A_matrix_hybrid filled ",
+            filled, " / ", Norbit,
+            " | missing ", round(100*missing/Norbit, digits=1), "%",
+            " | inner miss ", round(100*inner_fail/Norbit, digits=1), "%",
+            " | outer miss ", round(100*outer_fail/Norbit, digits=1), "%"
+        )
+    end
+
     A = return_occ ? vcat(A_vlos, A_occ) : A_vlos
     return diag ? (A, Dict("filled" => filled, "attempts" => Norbit)) : A
 end

@@ -157,6 +157,9 @@ class Runner:
         self.recent=deque(maxlen=5000)
         self.scaler=IdentityScaler() if StandardScaler is None else StandardScaler()
         self.scaled=False
+        self.fill_mode = False
+        self.fill_triggered = False
+        
     def enable_ai(self):
         self.model=Model(self.dim)
         self.agent=Agent(self.dim)
@@ -170,21 +173,56 @@ class Runner:
         good=deck.df[deck.df.status=="pass"]
         if len(good)>=10:
             return good.nsmallest(min(len(good),500),"chi2")[self.cols].sample(1).values[0]
+        
         return deck.df[self.cols].dropna().sample(1).values[0]
+    def detect_basin(self, deck):
+        good = deck.df[deck.df.status == "pass"]
+        if len(good) < 500:
+            return False
+        top = good.nsmallest(min(len(good), 200), "chi2")
+        chi_std = top["chi2"].std()
+        X = top[self.cols].values
+        spread = np.std(X, axis=0)
+        span = np.array([hi - lo for lo, hi in self.bounds])
+        rel_spread = np.mean(spread / span)
+        return (chi_std < 1.0) and (rel_spread < 0.15)
+    
+    def step_scale(self, deck):
+        if not self.ai:
+            return 0.2
+        if not self.fill_mode:
+            return 0.2
+        good = deck.df[deck.df.status == "pass"]
+        top = good.nsmallest(min(len(good), 200), "chi2")
+        X = top[self.cols].values
+        spread = np.std(X, axis=0)
+        span = np.array([hi - lo for lo, hi in self.bounds])
+        rel = np.mean(spread / span)
+        return clamp(0.01 + 0.2 * rel, 0.01, 0.05)
+
+
     def propose(self,deck):
         out=[]
         while len(out)<self.batch:
             if self.ai:
-                base=self._base(deck)
+                if self.fill_mode:
+                    good = deck.df[deck.df.status=="pass"]
+                    base = good.nsmallest(100,"chi2")[self.cols].sample(1).values[0]
+                else:
+                    base = self._base(deck)
                 xb=self.scaler.transform(base.reshape(1,-1)) if self.scaled else base.reshape(1,-1)
                 a=self.agent.act(torch.tensor(xb,dtype=torch.float32),self._noise()).numpy().squeeze()
-                theta=[clamp(base[i]+0.2*(hi-lo)*a[i],lo,hi)
-                       for i,(lo,hi) in enumerate(self.bounds)]
+                s = self.step_scale(deck)
+                if self.fill_mode and self.step % 200 == 0:
+                    print(f"[FillMode] step_scale={s:.4f}")
+                theta=[clamp(base[i]+s*(hi-lo)*a[i],lo,hi)
+                    for i,(lo,hi) in enumerate(self.bounds)]
             else:
                 theta=random_theta(self.bounds)
             if deck.is_forbidden(theta): continue
-            if min_dist(theta,self.recent)<self.min_d: continue
-            if deck.nearest_distance(theta,self.min_d)<self.min_d: continue
+            if not self.fill_mode:
+                if min_dist(theta,self.recent)<self.min_d: continue
+                if deck.nearest_distance(theta,self.min_d)<self.min_d: continue
             self.recent.append(theta)
             self.step+=1
             out.append((theta,self.step))
@@ -279,34 +317,32 @@ def run_daemon(config, physics_engine):
             thetas  = [theta for theta, pid in props]
             pids    = [pid   for theta, pid in props]
             results = [corpo.eval(theta) for theta in thetas]
-
         t_acc["eval"] += time.perf_counter() - t0
         t_cnt["eval"] += len(props)
-
         # ---- record results ----
         for (theta, pid), (status, chi2) in zip(zip(thetas, pids), results):
             reward = fixer.reward(status, chi2)
-
             t0 = time.perf_counter()
             deck.add(theta, chi2, reward, pid, status)
             t_acc["add"] += time.perf_counter() - t0
             t_cnt["add"] += 1
-
             flat.push(chi2)
             fixer.unlock(deck, runner)
             if chi2 < best:
                 best = chi2
             runs += 1
-
+            if not runner.fill_triggered:
+                if runner.detect_basin(deck):
+                    runner.fill_mode = True
+                    runner.fill_triggered = True
+                    print(f"[Daemon] Basin detected at run {runs} — switching to fill mode")
             if runs % PROF_EVERY == 0:
                 def avg(k):
                     n = t_cnt[k]
                     return (t_acc[k] / n) if n else 0.0
-
                 t_eval    = t_acc["eval"]
                 per_batch = t_eval / max(t_cnt["propose"], 1)
                 per_theta = t_eval / max(t_cnt["eval"], 1)
-
                 print(
                     f"[PROF] runs={runs} best={best:.4f} "
                     f"propose={avg('propose'):.4f}s "
@@ -316,12 +352,10 @@ def run_daemon(config, physics_engine):
                 )
                 t_acc.clear()
                 t_cnt.clear()
-
             if flat.flat():
                 deck.save()
                 print(f"[Daemon] Flat region detected after {runs} runs")
                 return
-
         # ---- training ----
         t0 = time.perf_counter()
         runner.train(deck)
