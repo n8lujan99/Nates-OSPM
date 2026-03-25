@@ -366,6 +366,7 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
     @inbounds for i in 1:Nstar
         has_vlos[i] && push!(vlos_idx, i)
     end
+    rapo_list = fill(NaN, Norbit)
     Nvlos = length(vlos_idx)
     ctx = get_halo_context(rho_s,r_s,MBH,halo_type)
     sini = clamp01(f64(sini))
@@ -395,6 +396,7 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
             break
         end
         rapo = f64(shells[idx_local])
+        rapo_list[c_claim] = rapo   
         idx_local = (idx_local == length(shells)) ? 1 : (idx_local + 1)
         !(isfinite(rapo) && rapo > 0) && continue
         lf = Lfrac[1 + (attempts % length(Lfrac))]   # deterministic cycle across attempts
@@ -474,6 +476,7 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
     A = return_occ ? vcat(A_vlos, A_occ) : A_vlos
     diag ? (A, Dict("filled"=>filled, "attempts"=>attempts)) : A
 end
+
 # Back-compat: old name. Treats all stars as having vlos.
 function build_A_matrix_stellar(Norbit::Int, R_star_m::Vector{Float64}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64},
         sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=4000, Lfrac::NTuple{5,Float64}=(0.05,0.2,0.4,0.7,1.0), dt_frac_orbit::Float64=0.01,
@@ -690,7 +693,6 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
     @assert length(v_star_mps)     == Nstar
     @assert length(verr_star_mps)  == Nstar
     Nstar == 0 && return zeros(Float64, 0, Norbit)
-
     # ---- vlos index map ----
     vlos_idx = Int[]
     sizehint!(vlos_idx, Nstar)
@@ -698,65 +700,50 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
         has_vlos[i] && push!(vlos_idx, i)
     end
     Nvlos = length(vlos_idx)
-
     ctx   = get_halo_context(rho_s, r_s, MBH, halo_type)
     sini  = clamp01(f64(sini))
     cosi  = sqrt(max(1.0 - sini * sini, 0.0))
     Rmin  = minimum(R_star_m)
     Rmax  = maximum(R_star_m)
     Nout  = Nvlos + (return_occ ? Nbins_occ : 0)
-
     if !(isfinite(Rmin) && isfinite(Rmax) && Rmax > Rmin)
         return zeros(Float64, Nout, Norbit)
     end
-
     shells     = sort(copy(R_star_m))
     Nshells    = length(shells)
     occ_edges  = collect(range(Rmin, Rmax; length=Nbins_occ + 1))
     theta0     = f64(pi / 2)
     orbit_ctx  = (frc=ctx.frc, R_pos=ctx.R, halo=ctx.halo)
-
     # Output matrices — each column written by exactly one thread, no races
     A_vlos = zeros(Float64, Nvlos,    Norbit)
     A_occ  = zeros(Float64, Nbins_occ, Norbit)
-
     # =========================
     # NEW: diagnostics tracking
     # =========================
     success_flags = falses(Norbit)
     min_r_reached = fill(Inf, Norbit)
     rapo_list     = fill(NaN, Norbit)
-
     # Per-thread RNGs
     nthreads = Threads.nthreads()
     rngs = [MersenneTwister(0x5eed1234 + UInt(t)) for t in 1:nthreads]
-
     next_orbit = Threads.Atomic{Int}(1)
     filled_atomic = Threads.Atomic{Int}(0)
-
     Threads.@threads for _ in 1:Threads.nthreads()
-
         tid  = Threads.threadid()
         rng  = rngs[tid]
-
         col_occ  = zeros(Float64, Nbins_occ)
         col_vlos = zeros(Float64, Nvlos)
-
         s_arr    = Float64[]
         vphi_arr = Float64[]
-
         while true
-
             c_claim = Threads.atomic_add!(next_orbit, 1)
             c_claim > Norbit && break
-
             idx_local = mod1(c_claim, Nshells)
-            rapo      = f64(shells[idx_local])
+            rapo = f64(shells[idx_local])
+            rapo_list[c_claim] = rapo
             !(isfinite(rapo) && rapo > 0.0) && continue
-
             lf      = Lfrac[1 + ((c_claim - 1) % length(Lfrac))]
             r0_frac = 0.95 + 0.04 * rand(rng)
-
             ic, Lz0, E0, vc, st = launch_orbit_apocenter(
                 rapo     = rapo,
                 theta0   = theta0,
