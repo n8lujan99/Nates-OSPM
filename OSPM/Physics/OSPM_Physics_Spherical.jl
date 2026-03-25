@@ -693,57 +693,71 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
     @assert length(v_star_mps)     == Nstar
     @assert length(verr_star_mps)  == Nstar
     Nstar == 0 && return zeros(Float64, 0, Norbit)
-    # ---- vlos index map ----
+
     vlos_idx = Int[]
     sizehint!(vlos_idx, Nstar)
     @inbounds for i in 1:Nstar
         has_vlos[i] && push!(vlos_idx, i)
     end
     Nvlos = length(vlos_idx)
+
     ctx   = get_halo_context(rho_s, r_s, MBH, halo_type)
     sini  = clamp01(f64(sini))
     cosi  = sqrt(max(1.0 - sini * sini, 0.0))
+
     Rmin  = minimum(R_star_m)
     Rmax  = maximum(R_star_m)
     Nout  = Nvlos + (return_occ ? Nbins_occ : 0)
+
     if !(isfinite(Rmin) && isfinite(Rmax) && Rmax > Rmin)
         return zeros(Float64, Nout, Norbit)
     end
+
     shells     = sort(copy(R_star_m))
     Nshells    = length(shells)
     occ_edges  = collect(range(Rmin, Rmax; length=Nbins_occ + 1))
     theta0     = f64(pi / 2)
     orbit_ctx  = (frc=ctx.frc, R_pos=ctx.R, halo=ctx.halo)
-    # Output matrices — each column written by exactly one thread, no races
+
     A_vlos = zeros(Float64, Nvlos,    Norbit)
     A_occ  = zeros(Float64, Nbins_occ, Norbit)
-    # =========================
-    # NEW: diagnostics tracking
-    # =========================
+
     success_flags = falses(Norbit)
     min_r_reached = fill(Inf, Norbit)
     rapo_list     = fill(NaN, Norbit)
-    # Per-thread RNGs
+    star_hit_flags = falses(Nstar)
+
     nthreads = Threads.nthreads()
     rngs = [MersenneTwister(0x5eed1234 + UInt(t)) for t in 1:nthreads]
+
     next_orbit = Threads.Atomic{Int}(1)
     filled_atomic = Threads.Atomic{Int}(0)
+
     Threads.@threads for _ in 1:Threads.nthreads()
+
         tid  = Threads.threadid()
         rng  = rngs[tid]
+
         col_occ  = zeros(Float64, Nbins_occ)
         col_vlos = zeros(Float64, Nvlos)
+
         s_arr    = Float64[]
         vphi_arr = Float64[]
+
         while true
+
             c_claim = Threads.atomic_add!(next_orbit, 1)
             c_claim > Norbit && break
+
             idx_local = mod1(c_claim, Nshells)
             rapo = f64(shells[idx_local])
             rapo_list[c_claim] = rapo
+
             !(isfinite(rapo) && rapo > 0.0) && continue
+
             lf      = Lfrac[1 + ((c_claim - 1) % length(Lfrac))]
             r0_frac = 0.95 + 0.04 * rand(rng)
+
             ic, Lz0, E0, vc, st = launch_orbit_apocenter(
                 rapo     = rapo,
                 theta0   = theta0,
@@ -764,9 +778,6 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
 
             isempty(r) && continue
 
-            # =========================
-            # NEW: record diagnostics
-            # =========================
             success_flags[c_claim] = true
             rapo_list[c_claim]     = rapo
             min_r_reached[c_claim] = minimum(r)
@@ -810,26 +821,35 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
                     vi    = f64(v_star_mps[istar])
                     si    = f64(verr_star_mps[istar])
                     s2    = si * si
+
                     if !(isfinite(s2) && s2 > 0.0)
                         col_vlos[row] = 0.0
                         continue
                     end
+
                     dR = max(dR_frac * Ri, 1e-12)
                     lo = Ri - dR
                     hi = Ri + dR
+
                     j0 = searchsortedfirst(s_sorted, lo)
                     j1 = searchsortedlast(s_sorted,  hi)
-                    if j1 < j0
+
+                    if j1 >= j0
+                        star_hit_flags[istar] = true
+                    else
                         col_vlos[row] = 0.0
                         continue
                     end
+
                     p        = 0.0
                     nhit     = j1 - j0 + 1
                     inv_norm = inv_sqrt2pi / si
+
                     @inbounds for j in j0:j1
                         dv = vi - vlos_sorted[j]
                         p += exp(-0.5 * (dv * dv) / s2)
                     end
+
                     col_vlos[row] = (p * inv_norm) / nhit
                 end
             end
@@ -843,9 +863,6 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
 
     filled = filled_atomic[]
 
-    # =========================
-    # NEW: enhanced warning
-    # =========================
     if filled < Norbit
         missing = Norbit - filled
         Rmed = median(R_star_m)
@@ -877,6 +894,12 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
             " | inner miss ", round(100*inner_fail/Norbit, digits=1), "%",
             " | outer miss ", round(100*outer_fail/Norbit, digits=1), "%"
         )
+    end
+
+    if Nvlos > 0
+        hits = sum(star_hit_flags[vlos_idx])
+        total = length(vlos_idx)
+        println("STAR COVERAGE: ", hits, " / ", total, " (", round(100*hits/total, digits=1), "%)")
     end
 
     A = return_occ ? vcat(A_vlos, A_occ) : A_vlos
