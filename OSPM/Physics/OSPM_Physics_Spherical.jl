@@ -952,15 +952,12 @@ function solve_weights_stellar_jl(
     Nstar  = size(A, 1) - Nocc
     Norbit = size(A, 2)
     Norbit <= 0 && return (zeros(Float64, 0), false)
-
     # scale regularization with problem size (matches Python)
     alpha_eff = alpha * (Norbit / 200.0) * (max(Nstar, 1) / 90.0)
-
     # initial weights — small uniform + noise (matches Python rng behaviour)
     rng = MersenneTwister(seed)
     w0  = rand(rng, Norbit) .+ 1e-3
     w0 ./= sum(w0)
-
     mask = rv_mask !== nothing ? rv_mask : trues(Nstar)
 
     # objective: negative log-likelihood + L2 regularization
@@ -1029,14 +1026,12 @@ function evaluate_batch_theta(
         maxiter::Int=500)
 
     nrow, nbatch = size(thetas)
-
     R_valid  = R_star_m[valid_vlos]
     v_valid  = v_star_mps[valid_vlos]
     ve_valid = verr_star_mps[valid_vlos]
     Nvalid   = length(R_valid)
     nu       = max(count(valid_vlos) - 3, 1)
     rv_mask = convert(Vector{Bool}, trues(Nvalid))
-
     status = Vector{Int}(undef, nbatch)
     chi2   = Vector{Float64}(undef, nbatch)
 

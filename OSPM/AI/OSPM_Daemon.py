@@ -280,7 +280,20 @@ def run_daemon(config, physics_engine):
 
         # ---- propose ----
         t0    = time.perf_counter()
-        props = runner.propose(deck)
+        base_props = runner.propose(deck)
+        props = []
+        for theta, pid in base_props:
+            rho_s, r_s, MBH = theta
+            variants = [
+                ("full",        [rho_s, r_s, MBH]),
+                ("no_bh",       [rho_s, r_s, 0.0]),
+                ("no_halo",     [0.0,   r_s, MBH]),
+                ("bh_small",    [rho_s, r_s, 0.1 * MBH]),
+                ("halo_small",  [0.1 * rho_s, r_s, MBH]),
+            ]
+            for label, tvar in variants:
+                props.append((tvar, pid, label))
+                
         t_acc["propose"] += time.perf_counter() - t0
         t_cnt["propose"] += 1
 
@@ -288,8 +301,9 @@ def run_daemon(config, physics_engine):
         t0 = time.perf_counter()
 
         if use_batch:
-            thetas    = [theta for theta, pid in props]
-            pids      = [pid   for theta, pid in props]
+            thetas = [theta for theta, pid, label in props]
+            pids   = [pid   for theta, pid, label in props]
+            labels = [label for theta, pid, label in props]
             theta_mat = np.array(thetas, dtype=float).T  # shape (ndim, batch)
             try:
                 jl_statuses, jl_chi2s = jl_batch(
@@ -320,10 +334,10 @@ def run_daemon(config, physics_engine):
         t_acc["eval"] += time.perf_counter() - t0
         t_cnt["eval"] += len(props)
         # ---- record results ----
-        for (theta, pid), (status, chi2) in zip(zip(thetas, pids), results):
+        for (theta, pid, label), (status, chi2) in zip(props, results):
             reward = fixer.reward(status, chi2)
             t0 = time.perf_counter()
-            deck.add(theta, chi2, reward, pid, status)
+            deck.add(theta, chi2, reward, pid, f"{status}_{label}")
             t_acc["add"] += time.perf_counter() - t0
             t_cnt["add"] += 1
             flat.push(chi2)
