@@ -146,4 +146,6 @@ CONFIG = {
     # Paths (authoritative)
     # =========================================================
     **build_data_paths(PROFILE_ROOT),
+    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_local.csv"), # This creates the new local deck this is the only difference
 }
+print("[CONFIG] CSV_PATH =", CONFIG["CSV_PATH"])

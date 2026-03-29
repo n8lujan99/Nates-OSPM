@@ -1,4 +1,7 @@
 # OSPM_Config_Center — Draco
+# !LOCAL VERSION! NOT FOR ARC OR CLUSTERS
+# Just so I have the option to run local tests that wont affect the cluster data 
+
 from pathlib import Path
 import pathlib
 import os
@@ -58,7 +61,7 @@ CONFIG = {
     # =========================================================
     # Parameter space — UPDATED (Draco tuned box)
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA": [3, 1500.0, 9e5],
+    "INITIAL_THETA": [3, 1800.0, 9e5],
     "THETA_BOUNDS": [
        (2.0, 15.0),      # rho_s  → high-density basin only
        (1800.0, 8000.0),    # r_s    → keep basin width
@@ -79,9 +82,9 @@ CONFIG = {
     "FILL_DEFAULT_STATUS": "todo",
 
     "BATCH_SIZE":          WORKERS,
-    "MIN_BATCH_SIZE":      8,
-    "MAX_BATCH_SIZE":      256,
-    "_PRINT_EVERY":        5,
+    "MIN_BATCH_SIZE":      16,
+    "MAX_BATCH_SIZE":      400,
+    "_PRINT_EVERY":        1,
     "_print_counter":      0,
 
     "AI_START_AFTER":        200,
@@ -99,12 +102,14 @@ CONFIG = {
     "FLAT_PATIENCE":         5,
     "AI_RESET_ON_FLAT":      False,
 
-    "MAX_RUNS":              10000,
-    "STOP_NO_IMPROVEMENT":   500,
+    "MAX_RUNS":              100000,
+    "STOP_NO_IMPROVEMENT":   5000,
     "IMPROVEMENT_EPSILON":   1e-6,
-    "LOG_INTERVAL":          100,
+    "LOG_INTERVAL":          1,
 
     "G":    6.67430e-11,
     "Msun": 1.98847e30,
     **build_data_paths(PROFILE_ROOT),
+    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_local.csv"), # This creates the new local deck this is the only difference
 }
+print("[CONFIG] CSV_PATH =", CONFIG["CSV_PATH"])

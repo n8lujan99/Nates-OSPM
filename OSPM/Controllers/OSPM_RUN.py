@@ -20,16 +20,13 @@ def build_physics_engine(config):
 def main():
     config = load_config()
     runtime = build_runtime(config)
-
     # Julia init BEFORE build_physics_engine and BEFORE torch
     from ..Physics import OSPM_Physics as P
     P._jl_init()
     from juliacall import Main
     print("Julia threads seen by module:", Main.OSPMPhysicsSpherical.NTHREADS)
-
-    physics_engine = build_physics_engine(config)  # ← moved after Julia init
+    physics_engine = build_physics_engine(config)
     print("torch imported after build?", "torch" in sys.modules)
-
     from .OSPM_API import OSPM_API
     api = OSPM_API(runtime)
     api.set_physics_engine(physics_engine)

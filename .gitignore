@@ -10,7 +10,7 @@ Data/Gal_Profiles/**/Dump/
 Data/Gal_Profiles/**/Testing/
 Data/Gal_Profiles/**/checkpoint/
 Data/Gal_Profiles/**/logs/
-
+Data/Gal_Profiles/Draco/Draco_OSPM_Config.py
 # Windows NTFS alternate data streams
 *:Zone.Identifier
 *Zone.Identifier

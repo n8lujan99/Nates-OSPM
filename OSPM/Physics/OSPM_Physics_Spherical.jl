@@ -944,7 +944,7 @@ function solve_weights_stellar_jl(
         Nocc::Int=0,
         lambda_occ::Float64=0.0,
         alpha::Float64=1e-2,
-        maxiter::Int=500,
+        maxiter::Int=150,
         eps::Float64=1e-300,
         sigma_floor_mps::Float64=2e3,
         seed::UInt=UInt(0))
@@ -1023,7 +1023,7 @@ function evaluate_batch_theta(
         Nocc::Int=0,
         lambda_occ::Float64=0.0,
         alpha::Float64=1e-2,
-        maxiter::Int=500)
+        maxiter::Int=150)
 
     nrow, nbatch = size(thetas)
     R_valid  = R_star_m[valid_vlos]
@@ -1035,7 +1035,7 @@ function evaluate_batch_theta(
     status = Vector{Int}(undef, nbatch)
     chi2   = Vector{Float64}(undef, nbatch)
 
-    Threads.@threads for i in 1:nbatch
+    Threads.@threads :dynamic for i in 1:nbatch
         try
             rho_s = Float64(thetas[1, i])
             r_s   = Float64(thetas[2, i])

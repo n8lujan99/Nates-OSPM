@@ -1,7 +1,7 @@
 # OSPM_Runner.py
 # STAYS IN PYTHON FOREVER
 # Parallelism lives in Julia, not here
-import os, time
+import os, time, sys
 import numpy as np
 import pandas as pd
 import torch
@@ -52,11 +52,14 @@ class Deck:
         self.path   = config["CSV_PATH"]
         self.cols   = config["REQUIRE_COLUMNS"]
         self.params = config["PARAMETER_NAMES"]
-        self.flush  = int(config.get("CSV_FLUSH_INTERVAL",50))
+        self.flush  = 1
+        #self.flush  = int(config.get("CSV_FLUSH_INTERVAL",50))
         self._dirty = 0
         self._load()
     def _load(self):
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        dir_name = os.path.dirname(self.path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
         if os.path.exists(self.path):
             df = pd.read_csv(self.path)
         else:
@@ -69,9 +72,10 @@ class Deck:
         missing=[c for c in self.cols if c not in df.columns]
         if missing:
             raise KeyError(f"Deck missing required columns: {missing}")
-        self.df = df[self.cols]
+        self.df = df[self.cols].copy()
     def save(self):
         self.df.to_csv(self.path,index=False)
+        print(f"[Deck] saved {len(self.df)} rows → {self.path}", flush=True)
     def is_forbidden(self, theta, ndp=12):
         A = np.round(self.df[self.params].values, ndp)
         t = np.round(theta, ndp)
@@ -85,7 +89,7 @@ class Deck:
     def add(self, theta, chi2, reward, pid, status):
         row={k:theta[i] for i,k in enumerate(self.params)}
         row |= dict(chi2=chi2,reward=reward,status=status,proposal_id=pid)
-        self.df.loc[len(self.df)] = row
+        self.df = pd.concat([self.df, pd.DataFrame([row])], ignore_index=True)
         self._dirty+=1
         if self._dirty>=self.flush:
             self.save(); self._dirty=0
@@ -118,7 +122,7 @@ class Fixer:
         self.unlocked=False
     def unlock(self, deck, runner):
         if self.unlocked: return
-        if (deck.df.status=="pass").sum()>=self.warmup:
+        if deck.df.status.str.startswith("pass").sum()>=self.warmup:
             runner.enable_ai()
             self.unlocked=True
             print("[AI] unlocked")
@@ -170,13 +174,13 @@ class Runner:
         if not self.ai: return self.noise0
         return max(self.noise1, self.noise0*np.exp(-self.step/self.tau))
     def _base(self,deck):
-        good=deck.df[deck.df.status=="pass"]
+        good=deck.df[deck.df.status.str.startswith("pass")]
         if len(good)>=10:
             return good.nsmallest(min(len(good),500),"chi2")[self.cols].sample(1).values[0]
         
         return deck.df[self.cols].dropna().sample(1).values[0]
     def detect_basin(self, deck):
-        good = deck.df[deck.df.status == "pass"]
+        good = deck.df[deck.df.status.str.startswith("pass")]
         if len(good) < 500:
             return False
         top = good.nsmallest(min(len(good), 200), "chi2")
@@ -192,7 +196,7 @@ class Runner:
             return 0.2
         if not self.fill_mode:
             return 0.2
-        good = deck.df[deck.df.status == "pass"]
+        good = deck.df[deck.df.status.str.startswith("pass")]
         top = good.nsmallest(min(len(good), 200), "chi2")
         X = top[self.cols].values
         spread = np.std(X, axis=0)
@@ -206,7 +210,7 @@ class Runner:
         while len(out)<self.batch:
             if self.ai:
                 if self.fill_mode:
-                    good = deck.df[deck.df.status=="pass"]
+                    good = deck.df[deck.df.status.str.startswith("pass")]
                     base = good.nsmallest(100,"chi2")[self.cols].sample(1).values[0]
                 else:
                     base = self._base(deck)
@@ -229,7 +233,7 @@ class Runner:
         return out
     def train(self,deck):
         if not self.ai: return
-        df=deck.df[(deck.df.status=="pass") & np.isfinite(deck.df.reward)]
+        df=deck.df[deck.df.status.str.startswith("pass") & np.isfinite(deck.df.reward)]
         if len(df)<200: return
         X=df[self.cols].values
         y=df.reward.values.reshape(-1,1)
@@ -279,6 +283,7 @@ def run_daemon(config, physics_engine):
     while runs < config["MAX_RUNS"]:
 
         # ---- propose ----
+        print(f"[Daemon] loop iter runs={runs}", flush=True)
         t0    = time.perf_counter()
         base_props = runner.propose(deck)
         props = []
@@ -297,48 +302,17 @@ def run_daemon(config, physics_engine):
         t_acc["propose"] += time.perf_counter() - t0
         t_cnt["propose"] += 1
 
-        # ---- physics eval ----
+        print(f"[Daemon] proposing {len(props)} variants, starting eval...", flush=True)
+        # ---- physics eval + immediate record ----
         t0 = time.perf_counter()
+        CHUNK = 80
 
-        if use_batch:
-            thetas = [theta for theta, pid, label in props]
-            pids   = [pid   for theta, pid, label in props]
-            labels = [label for theta, pid, label in props]
-            theta_mat = np.array(thetas, dtype=float).T  # shape (ndim, batch)
-            try:
-                jl_statuses, jl_chi2s = jl_batch(
-                    juliacall.convert(Main.Matrix[Main.Float64], theta_mat),
-                    juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m),
-                    juliacall.convert(Main.Vector[Main.Bool],    obs.valid_vlos),
-                    juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps),
-                    juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
-                    sini, Norbit, halo_type,
-                )
-                results = []
-                for i in range(len(thetas)):
-                    chi2   = float(jl_chi2s[i])
-                    status = "pass" if (int(jl_statuses[i]) == 0 and np.isfinite(chi2)) else "numeric_fail"
-                    if not np.isfinite(chi2):
-                        chi2 = np.inf
-                    results.append((status, chi2))
-            except Exception as e:
-                import traceback
-                print("[Daemon] batch eval failed, falling back to serial:", e)
-                traceback.print_exc()
-                results = [corpo.eval(theta) for theta in thetas]
-
-        else:
-            thetas  = [theta for theta, pid in props]
-            pids    = [pid   for theta, pid in props]
-            results = [corpo.eval(theta) for theta in thetas]
-        t_acc["eval"] += time.perf_counter() - t0
-        t_cnt["eval"] += len(props)
-        # ---- record results ----
-        for (theta, pid, label), (status, chi2) in zip(props, results):
+        def _record(theta, pid, label, status, chi2):
+            nonlocal best, runs
             reward = fixer.reward(status, chi2)
-            t0 = time.perf_counter()
+            t_add = time.perf_counter()
             deck.add(theta, chi2, reward, pid, f"{status}_{label}")
-            t_acc["add"] += time.perf_counter() - t0
+            t_acc["add"] += time.perf_counter() - t_add
             t_cnt["add"] += 1
             flat.push(chi2)
             fixer.unlock(deck, runner)
@@ -362,14 +336,60 @@ def run_daemon(config, physics_engine):
                     f"propose={avg('propose'):.4f}s "
                     f"eval/batch={per_batch:.4f}s "
                     f"eval/theta={per_theta:.4f}s "
-                    f"add={avg('add'):.4f}s"
+                    f"add={avg('add'):.4f}s",
+                    flush=True,
                 )
                 t_acc.clear()
                 t_cnt.clear()
             if flat.flat():
                 deck.save()
                 print(f"[Daemon] Flat region detected after {runs} runs")
-                return
+                return True  # signal stop
+            return False
+
+        stop = False
+        if use_batch:
+            thetas = [theta for theta, pid, label in props]
+            for i in range(0, len(thetas), CHUNK):
+                chunk_props  = props[i:i+CHUNK]
+                chunk_thetas = thetas[i:i+CHUNK]
+                theta_mat    = np.array(chunk_thetas, dtype=float).T
+                chunk_t0     = time.perf_counter()
+                try:
+                    jl_statuses, jl_chi2s = jl_batch(
+                        juliacall.convert(Main.Matrix[Main.Float64], theta_mat),
+                        juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m),
+                        juliacall.convert(Main.Vector[Main.Bool],    obs.valid_vlos),
+                        juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps),
+                        juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
+                        sini, Norbit, halo_type,
+                    )
+                    t_acc["eval"] += time.perf_counter() - chunk_t0
+                    t_cnt["eval"] += len(chunk_thetas)
+                    for j, (theta, pid, label) in enumerate(chunk_props):
+                        chi2   = float(jl_chi2s[j])
+                        status = "pass" if (int(jl_statuses[j]) == 0 and np.isfinite(chi2)) else "numeric_fail"
+                        if not np.isfinite(chi2): chi2 = np.inf
+                        if _record(theta, pid, label, status, chi2): stop = True; break
+                except Exception as e:
+                    t_acc["eval"] += time.perf_counter() - chunk_t0
+                    t_cnt["eval"] += len(chunk_thetas)
+                    print(f"[Daemon] chunk failed (size={len(chunk_thetas)}): {e}", flush=True)
+                    for theta, pid, label in chunk_props:
+                        if _record(theta, pid, label, "numeric_fail", np.inf): stop = True; break
+                if stop: break
+        else:
+            for theta, pid, label in props:
+                chunk_t0 = time.perf_counter()
+                status, chi2 = corpo.eval(theta)
+                t_acc["eval"] += time.perf_counter() - chunk_t0
+                t_cnt["eval"] += 1
+                if _record(theta, pid, label, status, chi2): stop = True; break
+
+        if stop:
+            return
+
+
         # ---- training ----
         t0 = time.perf_counter()
         runner.train(deck)
