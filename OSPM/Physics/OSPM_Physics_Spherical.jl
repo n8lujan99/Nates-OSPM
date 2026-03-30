@@ -346,135 +346,243 @@ function launch_orbit_apocenter(; rapo::Float64, theta0::Float64, Lz_frac::Float
     dt  = dt_frac / max(Om, dt_floor)
     return ((r0, theta0, dt, vr0, 0.0), Lz, E, vc, :ok)
 end
+
 # ======================================================================
 # HYBRID A-MATRIX:
 #   - rows 1:Nvlos   : velocity likelihood for stars with has_vlos=true
 #   - rows Nvlos+1:end : occupancy constraint (all stars), optional
-# ======================================================================
+# Production chi^2 evaluation (same call signature, parallel-safe)
+# ==============================================================
+
+# For radius dependent resolution
+function local_spacing(R_sorted, Ri)
+    idx = searchsortedfirst(R_sorted, Ri)
+    if idx <= 1
+        return R_sorted[2] - R_sorted[1]
+    elseif idx >= length(R_sorted)
+        return R_sorted[end] - R_sorted[end-1]
+    else
+        return 0.5 * (R_sorted[idx+1] - R_sorted[idx-1])
+    end
+end
+
 function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64},
-        verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=4000, 
-        Lfrac::NTuple{5,Float64}=(0.05,0.2,0.4,0.7,1.0), dt_frac_orbit::Float64=0.01, dR_frac::Float64=0.05, dR_floor_frac::Float64=0.01, dR_floor_pc::Float64=0.0,
-        Nbins_occ::Int=6, return_occ::Bool=true, max_attempts_factor::Int=60, diag::Bool=false)
+        verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64,
+        halo_type::String; nsteps::Int=4000, Lfrac::NTuple{5,Float64}=(0.05, 0.2, 0.4, 0.7, 1.0),
+        dt_frac_orbit::Float64=0.01, dR_frac::Float64=0.05, Nbins_occ::Int=6, return_occ::Bool=true, max_attempts_factor::Int=60,
+        diag::Bool=false)
+
     Nstar = length(R_star_m)
-    @assert length(has_vlos)==Nstar
-    @assert length(v_star_mps)==Nstar
-    @assert length(verr_star_mps)==Nstar
-    Nstar==0 && return zeros(Float64,0,Norbit)
-    # vlos index map
+    R_sorted = sort(R_star_m)
+    ΔR_med = median(diff(R_sorted))
+    @assert length(has_vlos)       == Nstar
+    @assert length(v_star_mps)     == Nstar
+    @assert length(verr_star_mps)  == Nstar
+    Nstar == 0 && return zeros(Float64, 0, Norbit)
+
     vlos_idx = Int[]
     sizehint!(vlos_idx, Nstar)
     @inbounds for i in 1:Nstar
         has_vlos[i] && push!(vlos_idx, i)
     end
-    rapo_list = fill(NaN, Norbit)
+
     Nvlos = length(vlos_idx)
-    ctx = get_halo_context(rho_s,r_s,MBH,halo_type)
-    sini = clamp01(f64(sini))
-    cosi = sqrt(max(1.0 - sini*sini, 0.0))
-    Rmin = minimum(R_star_m)
-    Rmax = maximum(R_star_m)
-    !(isfinite(Rmin)&&isfinite(Rmax)&&Rmax>Rmin) &&
-        return zeros(Float64, Nvlos + (return_occ ? Nbins_occ : 0), Norbit)
-    shells = sort(copy(R_star_m))
-    # occupancy bin edges
-    occ_edges = collect(range(Rmin,Rmax; length=Nbins_occ+1))
-    A_vlos = zeros(Float64, Nvlos, Norbit)
-    A_occ  = zeros(Float64, Nbins_occ, Norbit)
-    orbit_ctx = (frc=ctx.frc, R_pos=ctx.R, halo=ctx.halo)
-    theta0 = f64(pi/2)
-    # ------------------------------
-    # SERIAL ORBIT GENERATION 
-    # ------------------------------
-    rng         = MersenneTwister(0x5eed1234)
-    idx_local   = 1
-    attempts    = 0
-    max_attempts = max_attempts_factor * Norbit
-    filled = 0
-    @inbounds for c_claim in 1:Norbit
-        attempts += 1
-        if attempts > max_attempts
-            break
-        end
-        rapo = f64(shells[idx_local])
-        rapo_list[c_claim] = rapo   
-        idx_local = (idx_local == length(shells)) ? 1 : (idx_local + 1)
-        !(isfinite(rapo) && rapo > 0) && continue
-        lf = Lfrac[1 + (attempts % length(Lfrac))]   # deterministic cycle across attempts
-        r0_frac = 0.95 + 0.04*rand(rng)
-        ic, Lz0, E0, vc, st = launch_orbit_apocenter( rapo=rapo, theta0=theta0, Lz_frac=f64(lf),
-            pot=ctx.pot, frc=ctx.frc, r0_frac=r0_frac, dt_frac=dt_frac_orbit)
-        st != :ok && continue
-        r, vr, theta = integrate_orbit_rk4(ic=ic, xLz=Lz0, orbit_ctx=orbit_ctx, nsteps=nsteps)
-        isempty(r) && continue
-        # local column buffers
-        col_vlos = zeros(Float64, Nvlos)
-        col_occ  = zeros(Float64, Nbins_occ)
-        Nhits = length(r)
-        s_arr    = Vector{Float64}(undef, Nhits)
-        vphi_arr = Vector{Float64}(undef, Nhits)
-        @inbounds for i in 1:Nhits
-            si = _ssin(f64(theta[i]))
-            ri = f64(r[i])
-            s_arr[i] = ri * si
-            vphi_arr[i] = f64(Lz0) / (ri * si)
-        end
-        if return_occ && Nhits > 0
-            @inbounds for j in 1:Nbins_occ
-                lo = occ_edges[j]
-                hi = occ_edges[j+1]
-                cnt = 0
-                @inbounds for x in s_arr
-                    cnt += (x >= lo && x < hi) ? 1 : 0
-                end
-                col_occ[j] = cnt / Nhits
-            end
-        end
-        vlos_arr = @. sini*f64(vr) + cosi*vphi_arr
-        pidx = sortperm(s_arr)
-        s_sorted    = s_arr[pidx]
-        vlos_sorted = vlos_arr[pidx]
-        inv_sqrt2pi = inv(sqrt(2*pi))
-        if Nvlos > 0
-            @inbounds for row in 1:Nvlos
-                istar = vlos_idx[row]
-                Ri = f64(R_star_m[istar])
-                vi = f64(v_star_mps[istar])
-                si = f64(verr_star_mps[istar])
-                s2 = si*si
-                if !(isfinite(s2) && s2 > 0)
-                    col_vlos[row] = 0.0
-                    continue
-                end
-                dR = max(dR_frac*Ri, 1e-12)
-                lo = Ri - dR
-                hi = Ri + dR
-                j0 = searchsortedfirst(s_sorted, lo)
-                j1 = searchsortedlast(s_sorted, hi)
-                if j1 < j0
-                    col_vlos[row] = 0.0
-                    continue
-                end
-                p = 0.0
-                nhit = j1 - j0 + 1
-                inv_norm = inv_sqrt2pi / si
-                @inbounds for j in j0:j1
-                    dv = vi - vlos_sorted[j]
-                    p += exp(-0.5*(dv*dv)/s2)
-                end
-                col_vlos[row] = (p*inv_norm) / nhit
-            end
-        end
-        if Nvlos > 0
-            @inbounds A_vlos[:, c_claim] .= col_vlos
-        end
-        if return_occ
-            @inbounds A_occ[:, c_claim] .= col_occ
-        end
-        filled = c_claim
+    ctx   = get_halo_context(rho_s, r_s, MBH, halo_type)
+    sini  = clamp01(f64(sini))
+    cosi  = sqrt(max(1.0 - sini * sini, 0.0))
+
+    Rmin  = minimum(R_star_m)
+    Rmax  = maximum(R_star_m)
+    Nout  = Nvlos + (return_occ ? Nbins_occ : 0)
+
+    if !(isfinite(Rmin) && isfinite(Rmax) && Rmax > Rmin)
+        return zeros(Float64, Nout, Norbit)
     end
-    filled < Norbit && println("WARNING: build_A_matrix_hybrid filled ", filled, " / ", Norbit)
+
+    shells     = sort(copy(R_star_m))
+    Nshells    = length(shells)
+    occ_edges  = collect(range(Rmin, Rmax; length=Nbins_occ + 1))
+    theta0     = f64(pi / 2)
+    orbit_ctx  = (frc=ctx.frc, R_pos=ctx.R, halo=ctx.halo)
+    A_vlos = zeros(Float64, Nvlos,    Norbit)
+    A_occ  = zeros(Float64, Nbins_occ, Norbit)
+    success_flags = falses(Norbit)
+    min_r_reached = fill(Inf, Norbit)
+    rapo_list     = fill(NaN, Norbit)
+    star_hit_flags = falses(Nstar)
+    nthreads = Threads.nthreads()
+    rngs = [MersenneTwister(0x5eed1234 + UInt(t)) for t in 1:nthreads]
+    next_orbit = Threads.Atomic{Int}(1)
+    filled_atomic = Threads.Atomic{Int}(0)
+    Threads.@threads for _ in 1:Threads.nthreads()
+        tid  = Threads.threadid()
+        rng  = rngs[tid]
+        col_occ  = zeros(Float64, Nbins_occ)
+        col_vlos = zeros(Float64, Nvlos)
+        s_arr    = Float64[]
+        vphi_arr = Float64[]
+
+        while true
+            c_claim = Threads.atomic_add!(next_orbit, 1)
+            c_claim > Norbit && break
+            idx_local = mod1(c_claim, Nshells)
+            rapo = f64(shells[idx_local])
+            rapo_list[c_claim] = rapo
+            !(isfinite(rapo) && rapo > 0.0) && continue
+            lf      = Lfrac[1 + ((c_claim - 1) % length(Lfrac))]
+            r0_frac = 0.95 + 0.04 * rand(rng)
+            ic, Lz0, E0, vc, st = launch_orbit_apocenter(
+                rapo     = rapo,
+                theta0   = theta0,
+                Lz_frac  = f64(lf),
+                pot      = ctx.pot,
+                frc      = ctx.frc,
+                r0_frac  = r0_frac,
+                dt_frac  = dt_frac_orbit,
+            )
+            st != :ok && continue
+            r, vr, theta = integrate_orbit_rk4(
+                ic        = ic,
+                xLz       = Lz0,
+                orbit_ctx = orbit_ctx,
+                nsteps    = nsteps,
+            )
+            isempty(r) && continue
+            success_flags[c_claim] = true
+            rapo_list[c_claim]     = rapo
+            min_r_reached[c_claim] = minimum(r)
+            Nhits    = length(r)
+            resize!(s_arr,Nhits)
+            resize!(vphi_arr,Nhits)
+            @inbounds for i in 1:Nhits
+                si          = _ssin(f64(theta[i]))
+                ri          = f64(r[i])
+                s_arr[i]    = ri * si
+                vphi_arr[i] = f64(Lz0) / (ri * si)
+            end
+
+            fill!(col_occ,0.0)
+            fill!(col_vlos,0.0)
+            if return_occ && Nhits > 0
+                @inbounds for j in 1:Nbins_occ
+                    lo  = occ_edges[j]
+                    hi  = occ_edges[j + 1]
+                    cnt = 0
+                    @inbounds for x in s_arr
+                        cnt += (x >= lo && x < hi) ? 1 : 0
+                    end
+                    col_occ[j] = cnt / Nhits
+                end
+            end
+
+            if Nvlos > 0
+                vlos_arr    = @. sini * f64(vr) + cosi * vphi_arr
+                pidx        = sortperm(s_arr)
+                s_sorted    = s_arr[pidx]
+                vlos_sorted = vlos_arr[pidx]
+                inv_sqrt2pi = inv(sqrt(2 * pi))
+                @inbounds for row in 1:Nvlos
+                    istar = vlos_idx[row]
+                    Ri    = f64(R_star_m[istar])
+                    vi    = f64(v_star_mps[istar])
+                    si    = f64(verr_star_mps[istar])
+                    s2    = si * si
+
+                    if !(isfinite(s2) && s2 > 0.0)
+                        col_vlos[row] = 0.0
+                        continue
+                    end
+
+                    dR_local = local_spacing(R_sorted, Ri)
+                    dR = max(
+                        dR_frac * Ri,
+                        0.5 * dR_local,
+                        0.5 * ΔR_med
+                    )
+                    lo = Ri - dR
+                    hi = Ri + dR
+                    j0 = searchsortedfirst(s_sorted, lo)
+                    j1 = searchsortedlast(s_sorted,  hi)
+
+                    if j1 >= j0
+                        star_hit_flags[istar] = true
+                    else
+                        col_vlos[row] = 0.0
+                        continue
+                    end
+                    p        = 0.0
+                    nhit     = j1 - j0 + 1
+                    inv_norm = inv_sqrt2pi / si
+                    @inbounds for j in j0:j1
+                        dv = vi - vlos_sorted[j]
+                        p += exp(-0.5 * (dv * dv) / s2)
+                    end
+                    col_vlos[row] = (p * inv_norm) / nhit
+                end
+            end
+            @inbounds A_vlos[:, c_claim] .= col_vlos
+            @inbounds A_occ[:,  c_claim] .= col_occ
+            Threads.atomic_add!(filled_atomic, 1)
+        end
+    end
+    filled = filled_atomic[]
+    if filled < Norbit
+        missing = Norbit - filled
+        Rmed = median(R_star_m)
+        inner_fail = 0
+        outer_fail = 0
+        for i in 1:Norbit
+            if !success_flags[i]
+                rmin_i = min_r_reached[i]
+                if !isfinite(rmin_i)
+                    rmin_i = rapo_list[i]
+                end
+                if isfinite(rmin_i)
+                    if rmin_i < Rmed
+                        inner_fail += 1
+                    else
+                        outer_fail += 1
+                    end
+                end
+            end
+        end
+        println(
+            "WARNING: build_A_matrix_hybrid filled ",
+            filled, " / ", Norbit,
+            " | missing ", round(100*missing/Norbit, digits=1), "%",
+            " | inner miss ", round(100*inner_fail/Norbit, digits=1), "%",
+            " | outer miss ", round(100*outer_fail/Norbit, digits=1), "%"
+        )
+    end
+    if Nvlos > 0
+        hits = sum(star_hit_flags[vlos_idx])
+        total = length(vlos_idx)
+        println("STAR COVERAGE: ", hits, " / ", total, " (", round(100*hits/total, digits=1), "%)")
+    end
+    if Nvlos > 0
+        Rv = R_star_m[vlos_idx]
+        Rmin = minimum(Rv)
+        dR_vals = similar(Rv)
+        for i in eachindex(Rv)
+            dR_vals[i] = max(
+                dR_frac * Rv[i],
+                0.5 * local_spacing(R_sorted, Rv[i]),
+                0.5 * ΔR_med )
+        end
+        Rlo = Rv .- dR_vals
+        inner_effective = minimum(Rlo)
+        Rmed = median(Rv)
+        println(
+            "INNER SCALE: Rmin=",
+            round(Rmin, digits=3),
+            " | Reff=",
+            round(inner_effective, digits=3),
+            " | Rmed=",
+            round(Rmed, digits=3)
+        )
+    end
     A = return_occ ? vcat(A_vlos, A_occ) : A_vlos
-    diag ? (A, Dict("filled"=>filled, "attempts"=>attempts)) : A
+    return diag ? (A, Dict("filled" => filled, "attempts" => Norbit)) : A
 end
 
 # Back-compat: old name. Treats all stars as having vlos.
@@ -484,7 +592,7 @@ function build_A_matrix_stellar(Norbit::Int, R_star_m::Vector{Float64}, v_star_m
     
     has_vlos = trues(length(R_star_m))
     build_A_matrix_hybrid(Norbit, R_star_m, has_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, halo_type; nsteps=nsteps, Lfrac=Lfrac, dt_frac_orbit=dt_frac_orbit,
-            dR_frac=dR_frac, dR_floor_frac=dR_floor_frac, dR_floor_pc=dR_floor_pc, Nbins_occ=Nbins_occ, return_occ=return_occ, max_attempts_factor=max_attempts_factor, diag=diag)
+            dR_frac=dR_frac, Nbins_occ=Nbins_occ, return_occ=return_occ, max_attempts_factor=max_attempts_factor, diag=diag)
 end
 function get_orbit_template(shells::Vector{Float64}, Lfrac::NTuple{N,Float64}) where N
     key = _orbit_template_key(shells, Lfrac)
@@ -678,215 +786,7 @@ function _nnls_wls_pg!(A::Matrix{Float64}, d::Vector{Float64}, w2::Vector{Float6
     end
     return x
 end
-# ==============================================================
-# Production chi^2 evaluation (same call signature, parallel-safe)
-# ==============================================================
-function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64},
-        verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64,
-        halo_type::String; nsteps::Int=4000, Lfrac::NTuple{5,Float64}=(0.05, 0.2, 0.4, 0.7, 1.0),
-        dt_frac_orbit::Float64=0.01, dR_frac::Float64=0.05, dR_floor_frac::Float64=0.01,
-        dR_floor_pc::Float64=0.0, Nbins_occ::Int=6, return_occ::Bool=true, max_attempts_factor::Int=60,
-        diag::Bool=false)
 
-    Nstar = length(R_star_m)
-    @assert length(has_vlos)       == Nstar
-    @assert length(v_star_mps)     == Nstar
-    @assert length(verr_star_mps)  == Nstar
-    Nstar == 0 && return zeros(Float64, 0, Norbit)
-
-    vlos_idx = Int[]
-    sizehint!(vlos_idx, Nstar)
-    @inbounds for i in 1:Nstar
-        has_vlos[i] && push!(vlos_idx, i)
-    end
-
-    Nvlos = length(vlos_idx)
-    ctx   = get_halo_context(rho_s, r_s, MBH, halo_type)
-    sini  = clamp01(f64(sini))
-    cosi  = sqrt(max(1.0 - sini * sini, 0.0))
-
-    Rmin  = minimum(R_star_m)
-    Rmax  = maximum(R_star_m)
-    Nout  = Nvlos + (return_occ ? Nbins_occ : 0)
-
-    if !(isfinite(Rmin) && isfinite(Rmax) && Rmax > Rmin)
-        return zeros(Float64, Nout, Norbit)
-    end
-
-    shells     = sort(copy(R_star_m))
-    Nshells    = length(shells)
-    occ_edges  = collect(range(Rmin, Rmax; length=Nbins_occ + 1))
-    theta0     = f64(pi / 2)
-    orbit_ctx  = (frc=ctx.frc, R_pos=ctx.R, halo=ctx.halo)
-    A_vlos = zeros(Float64, Nvlos,    Norbit)
-    A_occ  = zeros(Float64, Nbins_occ, Norbit)
-    success_flags = falses(Norbit)
-    min_r_reached = fill(Inf, Norbit)
-    rapo_list     = fill(NaN, Norbit)
-    star_hit_flags = falses(Nstar)
-    nthreads = Threads.nthreads()
-    rngs = [MersenneTwister(0x5eed1234 + UInt(t)) for t in 1:nthreads]
-    next_orbit = Threads.Atomic{Int}(1)
-    filled_atomic = Threads.Atomic{Int}(0)
-    Threads.@threads for _ in 1:Threads.nthreads()
-        tid  = Threads.threadid()
-        rng  = rngs[tid]
-        col_occ  = zeros(Float64, Nbins_occ)
-        col_vlos = zeros(Float64, Nvlos)
-        s_arr    = Float64[]
-        vphi_arr = Float64[]
-
-        while true
-            c_claim = Threads.atomic_add!(next_orbit, 1)
-            c_claim > Norbit && break
-            idx_local = mod1(c_claim, Nshells)
-            rapo = f64(shells[idx_local])
-            rapo_list[c_claim] = rapo
-            !(isfinite(rapo) && rapo > 0.0) && continue
-            lf      = Lfrac[1 + ((c_claim - 1) % length(Lfrac))]
-            r0_frac = 0.95 + 0.04 * rand(rng)
-            ic, Lz0, E0, vc, st = launch_orbit_apocenter(
-                rapo     = rapo,
-                theta0   = theta0,
-                Lz_frac  = f64(lf),
-                pot      = ctx.pot,
-                frc      = ctx.frc,
-                r0_frac  = r0_frac,
-                dt_frac  = dt_frac_orbit,
-            )
-            st != :ok && continue
-            r, vr, theta = integrate_orbit_rk4(
-                ic        = ic,
-                xLz       = Lz0,
-                orbit_ctx = orbit_ctx,
-                nsteps    = nsteps,
-            )
-            isempty(r) && continue
-            success_flags[c_claim] = true
-            rapo_list[c_claim]     = rapo
-            min_r_reached[c_claim] = minimum(r)
-            Nhits    = length(r)
-            resize!(s_arr,Nhits)
-            resize!(vphi_arr,Nhits)
-            @inbounds for i in 1:Nhits
-                si          = _ssin(f64(theta[i]))
-                ri          = f64(r[i])
-                s_arr[i]    = ri * si
-                vphi_arr[i] = f64(Lz0) / (ri * si)
-            end
-
-            fill!(col_occ,0.0)
-            fill!(col_vlos,0.0)
-            if return_occ && Nhits > 0
-                @inbounds for j in 1:Nbins_occ
-                    lo  = occ_edges[j]
-                    hi  = occ_edges[j + 1]
-                    cnt = 0
-                    @inbounds for x in s_arr
-                        cnt += (x >= lo && x < hi) ? 1 : 0
-                    end
-                    col_occ[j] = cnt / Nhits
-                end
-            end
-
-            if Nvlos > 0
-                vlos_arr    = @. sini * f64(vr) + cosi * vphi_arr
-                pidx        = sortperm(s_arr)
-                s_sorted    = s_arr[pidx]
-                vlos_sorted = vlos_arr[pidx]
-                inv_sqrt2pi = inv(sqrt(2 * pi))
-                @inbounds for row in 1:Nvlos
-                    istar = vlos_idx[row]
-                    Ri    = f64(R_star_m[istar])
-                    vi    = f64(v_star_mps[istar])
-                    si    = f64(verr_star_mps[istar])
-                    s2    = si * si
-
-                    if !(isfinite(s2) && s2 > 0.0)
-                        col_vlos[row] = 0.0
-                        continue
-                    end
-
-                    dR = max(dR_frac * Ri, 1e-12)
-                    lo = Ri - dR
-                    hi = Ri + dR
-                    j0 = searchsortedfirst(s_sorted, lo)
-                    j1 = searchsortedlast(s_sorted,  hi)
-
-                    if j1 >= j0
-                        star_hit_flags[istar] = true
-                    else
-                        col_vlos[row] = 0.0
-                        continue
-                    end
-                    p        = 0.0
-                    nhit     = j1 - j0 + 1
-                    inv_norm = inv_sqrt2pi / si
-                    @inbounds for j in j0:j1
-                        dv = vi - vlos_sorted[j]
-                        p += exp(-0.5 * (dv * dv) / s2)
-                    end
-                    col_vlos[row] = (p * inv_norm) / nhit
-                end
-            end
-            @inbounds A_vlos[:, c_claim] .= col_vlos
-            @inbounds A_occ[:,  c_claim] .= col_occ
-            Threads.atomic_add!(filled_atomic, 1)
-        end
-    end
-    filled = filled_atomic[]
-    if filled < Norbit
-        missing = Norbit - filled
-        Rmed = median(R_star_m)
-        inner_fail = 0
-        outer_fail = 0
-        for i in 1:Norbit
-            if !success_flags[i]
-                rmin_i = min_r_reached[i]
-                if !isfinite(rmin_i)
-                    rmin_i = rapo_list[i]
-                end
-                if isfinite(rmin_i)
-                    if rmin_i < Rmed
-                        inner_fail += 1
-                    else
-                        outer_fail += 1
-                    end
-                end
-            end
-        end
-        println(
-            "WARNING: build_A_matrix_hybrid filled ",
-            filled, " / ", Norbit,
-            " | missing ", round(100*missing/Norbit, digits=1), "%",
-            " | inner miss ", round(100*inner_fail/Norbit, digits=1), "%",
-            " | outer miss ", round(100*outer_fail/Norbit, digits=1), "%"
-        )
-    end
-    if Nvlos > 0
-        hits = sum(star_hit_flags[vlos_idx])
-        total = length(vlos_idx)
-        println("STAR COVERAGE: ", hits, " / ", total, " (", round(100*hits/total, digits=1), "%)")
-    end
-    if Nvlos > 0
-        Rv = R_star_m[vlos_idx]
-        Rmin = minimum(Rv)
-        dR   = dR_frac .* Rv
-        Rlo  = Rv .- dR
-        inner_effective = minimum(Rlo)
-        Rmed = median(Rv)
-        println(
-            "INNER SCALE: Rmin=",
-            round(Rmin, digits=3),
-            " | Reff=",
-            round(inner_effective, digits=3),
-            " | Rmed=",
-            round(Rmed, digits=3)
-        )
-    end
-    A = return_occ ? vcat(A_vlos, A_occ) : A_vlos
-    return diag ? (A, Dict("filled" => filled, "attempts" => Norbit)) : A
-end
 
 # ==============================================================
 # Stellar log-likelihood (exact port of Python stellar_log_likelihood)
