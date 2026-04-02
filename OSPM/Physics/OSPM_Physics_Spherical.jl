@@ -24,6 +24,34 @@ const EPS_SIN = 1e-6
 # scale-aware force gate
 const REL_FORCE    = 1e-10   # loosen to 1e-9 if needed
 const BRACKET_FRAC = 1e-6    # MUST be >> eps(Float64)
+
+# ============================================================
+# TUNABLE KNOBS — adjust these to control resolution, accuracy,
+#                 and parallelism.  Everything in one place.
+# ============================================================
+# -- Halo potential grid --
+const DEFAULT_NR              = 256       # radial grid points for potential table
+const DEFAULT_RMAX_FACTOR     = 300.0     # max radius in units of r_s
+# -- Orbit integration --
+const DEFAULT_NSTEPS          = 4000      # RK4 steps per orbit
+const DEFAULT_STOP_RMIN_FACTOR = 1.001    # orbit stops when r < factor * rmin
+const DEFAULT_DT_FRAC         = 0.01      # timestep = dt_frac / orbital_frequency
+const DEFAULT_DT_FLOOR        = 1e-30     # floor on orbital-frequency denominator
+const DEFAULT_R0_FRAC         = 0.98      # starting radius as fraction of apocenter
+# -- A-matrix / orbit library --
+const DEFAULT_LFRAC           = (0.05, 0.2, 0.4, 0.7, 1.0)  # angular momentum fractions
+const DEFAULT_DR_FRAC         = 0.05      # radial matching tolerance (fraction of R)
+const DEFAULT_NBINS_OCC       = 6         # occupancy histogram bins
+const DEFAULT_MAX_ATTEMPTS    = 60        # max orbit-launch attempts multiplier
+const DEFAULT_DR_FLOOR_FRAC   = 0.01      # floor on dR (fraction)
+const DEFAULT_DR_FLOOR_PC     = 0.0       # floor on dR (parsecs)
+# -- Weight solver --
+const DEFAULT_ALPHA           = 1e-2      # L2 regularization strength
+const DEFAULT_MAXITER         = 150       # LBFGS iteration cap
+const DEFAULT_LOG_EPS         = 1e-300    # log-likelihood floor to avoid log(0)
+const DEFAULT_SIGMA_FLOOR_MPS = 2e3       # velocity-error floor [m/s]
+# ============================================================
+
 const _dbg_orbit_count=Ref(0)
 @inline f64(x)=Float64(x)
 @inline safe_sign(x)=x>0 ? 1.0 : (x<0 ? -1.0 : 0.0)
@@ -174,7 +202,7 @@ function make_potential_force_funcs(halo, R, nlegup, tabv, tabfr, Menc)
 
     pot, frc, R
 end
-function build_halo_context(rho_s, r_s, MBH, halo_type; nR=256, rmax_factor=300.0)
+function build_halo_context(rho_s, r_s, MBH, halo_type; nR=DEFAULT_NR, rmax_factor=DEFAULT_RMAX_FACTOR)
     halo=halo_from_theta(rho_s,r_s,MBH; halo_type=halo_type)
     R=build_R_halo_physical(nR; rmin=halo[:rmin], rmax=rmax_factor*halo[:rs])
     tabv,tabfr,Menc=tables_spherical(R,1,halo,rho_interp)
@@ -184,7 +212,7 @@ end
 @inline function _quant(x::Float64; digits::Int=10)
     return round(x, digits=digits)
 end
-function get_halo_context(rho_s, r_s, MBH, halo_type; nR=256, rmax_factor=300.0)
+function get_halo_context(rho_s, r_s, MBH, halo_type; nR=DEFAULT_NR, rmax_factor=DEFAULT_RMAX_FACTOR)
     ht = Symbol(lowercase(String(halo_type)))
     key = ( _quant(f64(rho_s)), _quant(f64(r_s)), _quant(f64(MBH)), ht, nR, _quant(f64(rmax_factor)))
     lock(_HALO_LOCK)
@@ -224,7 +252,7 @@ end
     dvtheta=(Lz*Lz)*ct/(r_safe^3*st^3) - (vr*vtheta)/r_safe
     SVector(dr,dtheta,dvr,dvtheta)
 end
-function integrate_orbit_rk4(; ic, xLz, orbit_ctx, nsteps=4000, stop_rmin_factor=1.001)
+function integrate_orbit_rk4(; ic, xLz, orbit_ctx, nsteps=DEFAULT_NSTEPS, stop_rmin_factor=DEFAULT_STOP_RMIN_FACTOR)
     halo = orbit_ctx.halo
     rmin_stop = stop_rmin_factor * f64(halo[:rmin])
     r0      = f64(ic[1])
@@ -291,7 +319,7 @@ function orbit_to_sigma2_profile(; r_arr, th_arr, vr_arr, xLz, r_centers_m, edge
     sig2
 end
 function launch_orbit_apocenter(; rapo::Float64, theta0::Float64, Lz_frac::Float64,
-    pot, frc, r0_frac::Float64=0.98, dt_frac::Float64=0.01, dt_floor::Float64=1e-30,
+    pot, frc, r0_frac::Float64=DEFAULT_R0_FRAC, dt_frac::Float64=DEFAULT_DT_FRAC, dt_floor::Float64=DEFAULT_DT_FLOOR,
     debug::Bool=true)
     ss = _ssin(theta0)
     if !(isfinite(ss) && abs(ss) > EPS_SIN)
@@ -365,9 +393,10 @@ end
 # DO NOT MODIFY without consulting Nate.
 function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64},
         verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64,
-        halo_type::String; nsteps::Int=4000, Lfrac::NTuple{5,Float64}=(0.05, 0.2, 0.4, 0.7, 1.0),
-        dt_frac_orbit::Float64=0.01, dR_frac::Float64=0.05, Nbins_occ::Int=6, return_occ::Bool=true, max_attempts_factor::Int=60,
-        diag::Bool=false)
+        halo_type::String; nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC,
+        dt_frac_orbit::Float64=DEFAULT_DT_FRAC, dR_frac::Float64=DEFAULT_DR_FRAC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS,
+        diag::Bool=false, threaded::Bool=true)
+
 
     Nstar = length(R_star_m)
     R_sorted = sort(R_star_m)
@@ -407,21 +436,30 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
     min_r_reached = fill(Inf, Norbit)
     rapo_list     = fill(NaN, Norbit)
     star_hit_flags = falses(Nstar)
-    nthreads = Threads.nthreads()
-    rngs = [MersenneTwister(0x5eed1234 + UInt(t)) for t in 1:nthreads]
+    nworkers = threaded ? Threads.nthreads() : 1
+    rngs = [MersenneTwister(0x5eed1234 + UInt(t)) for t in 1:nworkers]
+    # --- Cost-sorted dispatch: expensive orbits (low Lfrac, small rapo) go first ---
+    _orbit_cost = Vector{Float64}(undef, Norbit)
+    @inbounds for c in 1:Norbit
+        lf   = Lfrac[1 + ((c - 1) % length(Lfrac))]
+        rapo = shells[mod1(c, Nshells)]
+        _orbit_cost[c] = lf * rapo      # low = expensive (radial + deep)
+    end
+    cost_order = sortperm(_orbit_cost; rev=true)   # descending: expensive orbits dispatched first
+    # -----------------------------------------------------------------------
     next_orbit = Threads.Atomic{Int}(1)
     filled_atomic = Threads.Atomic{Int}(0)
-    Threads.@threads for _ in 1:Threads.nthreads()
-        tid  = Threads.threadid()
-        rng  = rngs[tid]
+
+    function _worker!(rng)
         col_occ  = zeros(Float64, Nbins_occ)
         col_vlos = zeros(Float64, Nvlos)
         s_arr    = Float64[]
         vphi_arr = Float64[]
 
         while true
-            c_claim = Threads.atomic_add!(next_orbit, 1)
-            c_claim > Norbit && break
+            c_seq = Threads.atomic_add!(next_orbit, 1)
+            c_seq > Norbit && break
+            c_claim = cost_order[c_seq]
             idx_local = mod1(c_claim, Nshells)
             rapo = f64(shells[idx_local])
             rapo_list[c_claim] = rapo
@@ -508,7 +546,15 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
             @inbounds A_occ[:,  c_claim] .= col_occ
             Threads.atomic_add!(filled_atomic, 1)
         end
+    end  # _worker!
+    if threaded && nworkers > 1
+        Threads.@threads for t in 1:nworkers
+            _worker!(rngs[t])
+        end
+    else
+        _worker!(rngs[1])
     end
+
     filled = filled_atomic[]
     if filled < Norbit
         missing = Norbit - filled
@@ -571,8 +617,8 @@ end
 
 # Back-compat: old name. Treats all stars as having vlos.
 function build_A_matrix_stellar(Norbit::Int, R_star_m::Vector{Float64}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64},
-        sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=4000, Lfrac::NTuple{5,Float64}=(0.05,0.2,0.4,0.7,1.0), dt_frac_orbit::Float64=0.01,
-        dR_frac::Float64=0.05, dR_floor_frac::Float64=0.01, dR_floor_pc::Float64=0.0, Nbins_occ::Int=6, return_occ::Bool=true, max_attempts_factor::Int=60, diag::Bool=false)
+        sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC, dt_frac_orbit::Float64=DEFAULT_DT_FRAC,
+        dR_frac::Float64=DEFAULT_DR_FRAC, dR_floor_frac::Float64=DEFAULT_DR_FLOOR_FRAC, dR_floor_pc::Float64=DEFAULT_DR_FLOOR_PC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS, diag::Bool=false)
     
     has_vlos = trues(length(R_star_m))
     build_A_matrix_hybrid(Norbit, R_star_m, has_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, halo_type; nsteps=nsteps, Lfrac=Lfrac, dt_frac_orbit=dt_frac_orbit,
@@ -605,8 +651,8 @@ function build_A_matrix_from_ctx(ctx::HaloContext, th0, dt, r_centers_m, valid, 
     theta0        = f64(th0[1])
     theta_hash    = hash((ctx.halo[:rho_s], ctx.halo[:r_s], ctx.halo[:MBH]))
     rng           = MersenneTwister(UInt(theta_hash))
-    dt_frac_orbit = 0.01
-    Lfrac         = (0.05, 0.2, 0.4, 0.7, 1.0)
+    dt_frac_orbit = DEFAULT_DT_FRAC
+    Lfrac         = DEFAULT_LFRAC
     # Cached orbit launch grid
     rapos, lvals  = get_orbit_template(shells, Lfrac)
     Norbit        = length(rapos)
@@ -737,7 +783,7 @@ end
 
 # Stellar log-likelihood (exact port of Python; no rescaling). A:(Nstar×Norbit), w:(Norbit,), verr [m/s]
 function stellar_log_likelihood_jl( A::Matrix{Float64}, w::Vector{Float64}, verr::Vector{Float64}; rv_mask::Union{Vector{Bool},Nothing}=nothing,
-        lambda_occ::Float64=0.0, Nocc::Int=0, eps::Float64=1e-300, sigma_floor_mps::Float64=2e3)
+        lambda_occ::Float64=0.0, Nocc::Int=0, eps::Float64=DEFAULT_LOG_EPS, sigma_floor_mps::Float64=DEFAULT_SIGMA_FLOOR_MPS)
     Nstar = size(A, 1) - Nocc
     p = A * w
     ll = 0.0
@@ -760,7 +806,7 @@ end
 
 # Weight solver (port of Python solve_weights_stellar). Optim Fminbox(LBFGS()), no row rescaling. Returns (w_normed, ok::Bool)
 function solve_weights_stellar_jl( A::Matrix{Float64}, verr::Vector{Float64}; rv_mask::Union{Vector{Bool},Nothing}=nothing, Nocc::Int=0, lambda_occ::Float64=0.0,
-        alpha::Float64=1e-2, maxiter::Int=150, eps::Float64=1e-300, sigma_floor_mps::Float64=2e3, seed::UInt=UInt(0))
+        alpha::Float64=DEFAULT_ALPHA, maxiter::Int=DEFAULT_MAXITER, eps::Float64=DEFAULT_LOG_EPS, sigma_floor_mps::Float64=DEFAULT_SIGMA_FLOOR_MPS, seed::UInt=UInt(0))
     Nstar  = size(A, 1) - Nocc
     Norbit = size(A, 2)
     Norbit <= 0 && return (zeros(Float64, 0), false)
@@ -817,7 +863,7 @@ end
 
 # Batch evaluator (@threads): build A + solve weights + chi2_red per theta. status: 0=pass 1=A_fail 2=weights_fail 3=exception
 function evaluate_batch_theta( thetas::AbstractMatrix{<:Real}, R_star_m::Vector{Float64}, valid_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64},
-        sini::Float64, Norbit::Int, halo_type::String; Nocc::Int=0, lambda_occ::Float64=0.0, alpha::Float64=1e-2, maxiter::Int=150)
+        sini::Float64, Norbit::Int, halo_type::String; Nocc::Int=0, lambda_occ::Float64=0.0, alpha::Float64=DEFAULT_ALPHA, maxiter::Int=DEFAULT_MAXITER)
 
     nrow, nbatch = size(thetas)
     R_valid  = R_star_m[valid_vlos]
@@ -837,7 +883,7 @@ function evaluate_batch_theta( thetas::AbstractMatrix{<:Real}, R_star_m::Vector{
 
             # --- build full hybrid matrix (velocity + light) ---
             A = build_A_matrix_hybrid( Norbit, R_star_m, valid_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s,
-                MBH, halo_type; return_occ=true, Nbins_occ=Nocc )
+                MBH, halo_type; return_occ=true, Nbins_occ=Nocc, threaded=false )
 
             m, n = size(A)
             if m == 0 || n == 0 || !all(isfinite, A)

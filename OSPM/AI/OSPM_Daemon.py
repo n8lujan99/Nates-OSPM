@@ -336,9 +336,8 @@ def run_daemon(config, physics_engine):
             return False
         
         if use_batch:
-            from juliacall import Main
-            import juliacall
             thetas = [theta for theta, pid, label in props]
+            stop = False
             for i in range(0, len(thetas), CHUNK):
                 chunk_props  = props[i:i+CHUNK]
                 chunk_thetas = thetas[i:i+CHUNK]
@@ -353,12 +352,7 @@ def run_daemon(config, physics_engine):
                         juliacall.convert(Main.Vector[Main.Bool], obs.valid_vlos),
                         juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps),
                         juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
-                        sini,
-                        Norbit,
-                        halo_type,
-                        Nocc=NBINS_OCC,
-                        lambda_occ=LAMBDA_OCC,
-                    )
+                        sini, Norbit, halo_type, Nocc=NBINS_OCC, lambda_occ=LAMBDA_OCC)
 
                     t_acc["eval"] += time.perf_counter() - chunk_t0
                     t_cnt["eval"] += len(chunk_thetas)
