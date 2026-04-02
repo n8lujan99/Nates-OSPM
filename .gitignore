@@ -1,4 +1,4 @@
-# virtual env
+x# virtual env
 .venv/
 
 # python junk
@@ -34,10 +34,3 @@ logs/
 *.err
 slurm-*.out
 
-# Cluster run archives
-Data/Gal_Profiles/Draco/default/cluster_outputs/
-Data/Gal_Profiles/Segue1/default/cluster_outputs/
-
-# Data/Gal_Profiles/Galaxy/default/cluster_outputs/
-which_galaxy
-.CondaPkg/
