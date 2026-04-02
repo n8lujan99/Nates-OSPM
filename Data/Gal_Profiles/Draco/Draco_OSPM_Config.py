@@ -57,6 +57,11 @@ CONFIG = {
         "N_TARGET_CIRC":       5,
         "MIN_PER_BIN_CIRC":    6,
     },
+    
+    "OBSERVABLES": {
+    "NBINS_OCC": 6,
+    "LAMBDA_OCC": 0.3,
+    },
 
     # =========================================================
     # Parameter space — UPDATED (Draco tuned box)
@@ -66,7 +71,7 @@ CONFIG = {
        (2.0, 15.0),      # rho_s  → high-density basin only
        (1800.0, 8000.0),    # r_s    → keep basin width
        (5.5e5, 5e6),    # MBH    → upper cluster region
-],
+    ],
     "PEN_SPHERE_STRENGTH": 200,
     "PEN_SPHERE_POWER":    2.0,
     "PEN_SLOPE_STRENGTH":  5000,

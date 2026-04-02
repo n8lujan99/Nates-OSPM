@@ -178,19 +178,7 @@ def halo_kwargs_from_ctx(ctx):
     )
 
 
-def build_A_matrix_stellar_julia(
-    *,
-    R_star_m,
-    v_star_mps,
-    verr_star_mps,
-    sini,
-    Norbit,
-    theta,
-    halo_type,
-    return_occ=False,
-    Nbins_occ=6,
-    diag=False
-):
+def build_A_matrix_stellar_julia(*, R_star_m, v_star_mps, verr_star_mps, sini, Norbit, theta, halo_type, return_occ=False, Nbins_occ=6, diag=False):
     if not USE_JULIA:
         raise RuntimeError("Stellar mode requires Julia")
 
@@ -217,20 +205,7 @@ def build_A_matrix_stellar_julia(
     vj  = PC.pyconvert(VecF, v_py)
     vej = PC.pyconvert(VecF, ve_py)
 
-    out = _Main.OSPMPhysicsSpherical.build_A_matrix_stellar(
-        int(Norbit),
-        Rj,
-        vj,
-        vej,
-        float(sini),
-        float(rho_s),
-        float(r_s),
-        float(MBH),
-        str(ht),
-        return_occ=bool(return_occ),
-        Nbins_occ=int(Nbins_occ),
-        diag=bool(diag),
-    )
+    out = _Main.OSPMPhysicsSpherical.build_A_matrix_stellar(int(Norbit), Rj, vj, vej, float(sini), float(rho_s), float(r_s), float(MBH), str(ht), return_occ=bool(return_occ), Nbins_occ=int(Nbins_occ), diag=bool(diag))
 
     if diag:
         A, meta = out
@@ -259,27 +234,12 @@ def build_A_matrix(obs, ctx, *, return_occ=False, Nbins_occ=6, diag=False):
             & np.isfinite(obs.verr_star_mps)
             & (np.asarray(obs.verr_star_mps, float) > 0)
         )
-
     R = np.asarray(obs.R_star_m, float)[vv]
     v = np.asarray(obs.v_star_mps, float)[vv]
     ve = np.asarray(obs.verr_star_mps, float)[vv]
     if len(R) == 0:
         raise RuntimeError("No RV-valid stars to build A-matrix")
-
-    return build_A_matrix_stellar_julia(
-        R_star_m=R,
-        v_star_mps=v,
-        verr_star_mps=ve,
-        sini=float(obs.sini),
-        Norbit=int(obs.Norbit),
-        theta=theta,
-        halo_type=halo_type,
-        return_occ=bool(return_occ),
-        Nbins_occ=int(Nbins_occ),
-        diag=bool(diag),
-    )
-
-
+    return build_A_matrix_stellar_julia(R_star_m=R, v_star_mps=v, verr_star_mps=ve, sini=float(obs.sini), Norbit=int(obs.Norbit), theta=theta, halo_type=halo_type, return_occ=bool(return_occ), Nbins_occ=int(Nbins_occ), diag=bool(diag))
 def build_A_matrix_from_theta(obs, theta, *, halo_type="nfw", return_occ=True, Nbins_occ=6, diag=False):
     ctx = build_dynamics_context(theta=theta, halo_type=halo_type)
     return build_A_matrix(obs, ctx, return_occ=bool(return_occ), Nbins_occ=int(Nbins_occ), diag=bool(diag))

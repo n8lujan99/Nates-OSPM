@@ -1,4 +1,4 @@
-# OSPM_Runner.py
+# OSPM_Daemon.py
 # STAYS IN PYTHON FOREVER
 # Parallelism lives in Julia, not here
 import os, time, sys
@@ -7,7 +7,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from collections import deque
-torch.set_num_threads(1)
 torch.backends.cudnn.benchmark = False
 try:
     from sklearn.preprocessing import StandardScaler
@@ -30,14 +29,12 @@ class IdentityScaler:
 class Model(nn.Module):
     def __init__(self, dim, width=64):
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(dim,width), nn.ReLU(),
-            nn.Linear(width,width), nn.ReLU(), nn.Linear(width,1))
+        self.net = nn.Sequential(nn.Linear(dim, width), nn.ReLU(), nn.Linear(width, width), nn.ReLU(), nn.Linear(width, 1))
     def forward(self, x): return self.net(x)
 class Agent(nn.Module):
     def __init__(self, dim, hidden=128):
         super().__init__()
-        self.net = nn.Sequential( nn.Linear(dim,hidden), nn.ReLU(),
-            nn.Linear(hidden,hidden), nn.ReLU(), nn.Linear(hidden,dim), nn.Tanh())
+        self.net = nn.Sequential(nn.Linear(dim, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, dim), nn.Tanh())
     def forward(self, x): return self.net(x)
     @torch.no_grad()
     def act(self, x, noise):
@@ -243,9 +240,11 @@ class Runner:
         yt=torch.tensor(y,dtype=torch.float32)
         loss=((self.model(Xt)-yt)**2).mean()
         self.opt_m.zero_grad(); loss.backward(); self.opt_m.step()
+        
 # ============================================================
 # Daemon
 # ============================================================
+
 def run_daemon(config, physics_engine):
     from collections import defaultdict
 
@@ -253,11 +252,7 @@ def run_daemon(config, physics_engine):
     runner = Runner(config)
     corpo  = Corpo(physics_engine)
     fixer  = Fixer(config)
-    flat   = FlatDetector(
-        config.get("FLAT_WINDOW", 200),
-        config.get("FLAT_THRESHOLD", 1e-6),
-        config.get("FLAT_PATIENCE", 3)
-    )
+    flat   = FlatDetector(config.get("FLAT_WINDOW", 200), config.get("FLAT_THRESHOLD", 1e-6), config.get("FLAT_PATIENCE", 3))
 
     runs = 0
     best = np.inf
@@ -331,14 +326,7 @@ def run_daemon(config, physics_engine):
                 t_eval    = t_acc["eval"]
                 per_batch = t_eval / max(t_cnt["propose"], 1)
                 per_theta = t_eval / max(t_cnt["eval"], 1)
-                print(
-                    f"[PROF] runs={runs} best={best:.4f} "
-                    f"propose={avg('propose'):.4f}s "
-                    f"eval/batch={per_batch:.4f}s "
-                    f"eval/theta={per_theta:.4f}s "
-                    f"add={avg('add'):.4f}s",
-                    flush=True,
-                )
+                print(f"[PROF] runs={runs} best={best:.4f} " f"propose={avg('propose'):.4f}s " f"eval/batch={per_batch:.4f}s " f"eval/theta={per_theta:.4f}s " f"add={avg('add'):.4f}s", flush=True)
                 t_acc.clear()
                 t_cnt.clear()
             if flat.flat():
@@ -346,9 +334,10 @@ def run_daemon(config, physics_engine):
                 print(f"[Daemon] Flat region detected after {runs} runs")
                 return True  # signal stop
             return False
-
-        stop = False
+        
         if use_batch:
+            from juliacall import Main
+            import juliacall
             thetas = [theta for theta, pid, label in props]
             for i in range(0, len(thetas), CHUNK):
                 chunk_props  = props[i:i+CHUNK]
@@ -356,21 +345,43 @@ def run_daemon(config, physics_engine):
                 theta_mat    = np.array(chunk_thetas, dtype=float).T
                 chunk_t0     = time.perf_counter()
                 try:
-                    jl_statuses, jl_chi2s = jl_batch(
+                    NBINS_OCC  = config["OBSERVABLES"]["NBINS_OCC"]
+                    LAMBDA_OCC = config["OBSERVABLES"]["LAMBDA_OCC"]
+                    status_code_vec, chi2_vec = jl_batch(
                         juliacall.convert(Main.Matrix[Main.Float64], theta_mat),
                         juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m),
-                        juliacall.convert(Main.Vector[Main.Bool],    obs.valid_vlos),
+                        juliacall.convert(Main.Vector[Main.Bool], obs.valid_vlos),
                         juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps),
                         juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
-                        sini, Norbit, halo_type,
+                        sini,
+                        Norbit,
+                        halo_type,
+                        Nocc=NBINS_OCC,
+                        lambda_occ=LAMBDA_OCC,
                     )
+
                     t_acc["eval"] += time.perf_counter() - chunk_t0
                     t_cnt["eval"] += len(chunk_thetas)
+
                     for j, (theta, pid, label) in enumerate(chunk_props):
-                        chi2   = float(jl_chi2s[j])
-                        status = "pass" if (int(jl_statuses[j]) == 0 and np.isfinite(chi2)) else "numeric_fail"
-                        if not np.isfinite(chi2): chi2 = np.inf
-                        if _record(theta, pid, label, status, chi2): stop = True; break
+                        chi2 = float(chi2_vec[j])
+                        code = int(status_code_vec[j])
+
+                        if code == 0 and np.isfinite(chi2):
+                            status = "pass"
+                        elif code == 1:
+                            status = "orbit_fail"
+                        elif code == 2:
+                            status = "numeric_fail"
+                        else:
+                            status = "unknown_fail"
+
+                        if not np.isfinite(chi2):
+                            chi2 = np.inf
+
+                        if _record(theta, pid, label, status, chi2):
+                            stop = True
+                            break
                 except Exception as e:
                     t_acc["eval"] += time.perf_counter() - chunk_t0
                     t_cnt["eval"] += len(chunk_thetas)
@@ -385,15 +396,10 @@ def run_daemon(config, physics_engine):
                 t_acc["eval"] += time.perf_counter() - chunk_t0
                 t_cnt["eval"] += 1
                 if _record(theta, pid, label, status, chi2): stop = True; break
-
         if stop:
             return
-
-
-        # ---- training ----
         t0 = time.perf_counter()
         runner.train(deck)
         t_acc["train"] += time.perf_counter() - t0
         t_cnt["train"] += 1
-
     deck.save()
