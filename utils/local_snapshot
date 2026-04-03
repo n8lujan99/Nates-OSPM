@@ -1,0 +1,10 @@
+#!/bin/bash
+
+cd ~/research/Nates-OSPM || exit
+
+echo "[LOCAL] snapshot run"
+
+LOM_MODE=local python Cockpit/Large_Observer_Model.py
+
+echo "[LOCAL] opening GUI"
+python Cockpit/cockpit_gui.py

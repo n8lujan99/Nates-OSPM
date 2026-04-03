@@ -1,0 +1,101 @@
+{
+  "status": "ok",
+  "galaxy": "Draco",
+  "timestamp": "2026-03-29T14:42:47",
+  "n_points": 19635,
+  "support_points": 3927,
+  "support_fraction": 0.2,
+  "center": {
+    "rho_s": 6.326829417634299,
+    "r_s": 3435.6852892455627,
+    "MBH": 2249536.773840151
+  },
+  "range_16_84": {
+    "rho_s": [
+      4.648388808648282,
+      9.156231185073777
+    ],
+    "r_s": [
+      2620.0929406729692,
+      4808.740526522524
+    ],
+    "MBH": [
+      840911.0199220757,
+      4556124.872932122
+    ]
+  },
+  "boundary_pressure": {
+    "rho_s": {
+      "low": 0.0,
+      "high": 0.005856888209829387
+    },
+    "r_s": {
+      "low": 0.0,
+      "high": 0.0073847720906544435
+    },
+    "MBH": {
+      "low": 0.024191494779730073,
+      "high": 0.17188693659281895
+    }
+  },
+  "evidence": {
+    "chi2": {
+      "global_best": 14.752641328730409,
+      "global_median": 1384.5583943802346,
+      "subset_best": 14.752641328730409,
+      "subset_median": 45.757207360481296,
+      "subset_std": 19.655795047041533
+    },
+    "spread": {
+      "rho_s": {
+        "lo": 4.648388808648282,
+        "hi": 9.156231185073777,
+        "width": 4.5078423764254945
+      },
+      "r_s": {
+        "lo": 2620.0929406729692,
+        "hi": 4808.740526522524,
+        "width": 2188.647585849555
+      },
+      "MBH": {
+        "lo": 840911.0199220757,
+        "hi": 4556124.872932122,
+        "width": 3715213.8530100463
+      }
+    },
+    "correlation_vs_chi2": {
+      "rho_s": -0.6302677603651383,
+      "r_s": -0.6605569300856083,
+      "MBH": -0.2378647790051559
+    }
+  },
+  "gp_shape_hint": "basin_like",
+  "gp_curvature_proxy": [
+    0.4149893989904285,
+    0.4861056288866621,
+    0.5434955911846373
+  ],
+  "notes": [
+    "dataset: 19635 pass rows \u2014 top 20.0% (3927 models) form the support cloud",
+    "chi2: global_best=14.75  subset_best=14.75  subset_median=45.76",
+    "GP landscape: basin_like \u2014 GP sees a bowl \u2014 genuine minimum, bounds look reliable",
+    "  GP curvature rho_s: concave up (4.150e-01) \u2014 well-constrained direction",
+    "  GP curvature r_s: concave up (4.861e-01) \u2014 well-constrained direction",
+    "  GP curvature MBH: concave up (5.435e-01) \u2014 well-constrained direction",
+    "rho_s: center=6.327  16-84 range=[4.648, 9.156]  spread~71.2% of center",
+    "  strong chi2 trend (r=-0.63): lower values preferred \u2014 consider shifting bounds",
+    "r_s: center=3436  16-84 range=[2620, 4809]  spread~63.7% of center",
+    "  strong chi2 trend (r=-0.66): lower values preferred \u2014 consider shifting bounds",
+    "MBH: center=2.25e+06  16-84 range=[8.409e+05, 4.556e+06]  spread~165.2% of center",
+    "suggested bounds for next run (written to patch):",
+    "  rho_s: [0.6013, 14.82]  center=6.327",
+    "  r_s: [50, 7987]  center=3436",
+    "  MBH: [3554, 5e+06]  center=2.25e+06",
+    "ACTION: basin confirmed, no edge pressure \u2014 safe to tighten bounds or increase resolution"
+  ],
+  "config_patch_text": "# --- LOM suggested region update for Draco ---\n# generated: 2026-03-29T14:42:47\n\"PARAMETER_NAMES\": [\"rho_s\", \"r_s\", \"MBH\"],\n\"INITIAL_THETA\": [6.327, 3436.0, 2.250e+06],\n\"THETA_BOUNDS\": [\n   (0.6013, 14.82),      # rho_s\n   (50.0, 7987.0),    # r_s\n   (3554.0, 5.000e+06),      # MBH\n],",
+  "config_patch_cmd": "#!/bin/bash\n\ncd /home/nate/research/Nates-OSPM\ncat <<'EOF' >> Data/Gal_Profiles/Draco/Draco_OSPM_Config.py\n# --- LOM suggested region update for Draco ---\n# generated: 2026-03-29T14:42:47\n\"PARAMETER_NAMES\": [\"rho_s\", \"r_s\", \"MBH\"],\n\"INITIAL_THETA\": [6.327, 3436.0, 2.250e+06],\n\"THETA_BOUNDS\": [\n   (0.6013, 14.82),      # rho_s\n   (50.0, 7987.0),    # r_s\n   (3554.0, 5.000e+06),      # MBH\n],\nEOF\n",
+  "deck_path": "/home/nate/research/Nates-OSPM/Data/Gal_Profiles/Draco/default/daemon_deck.csv",
+  "config_path": "/home/nate/research/Nates-OSPM/Data/Gal_Profiles/Draco/Draco_OSPM_Config.py",
+  "lom_mode": "local"
+}

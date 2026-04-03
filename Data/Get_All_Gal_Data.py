@@ -3,12 +3,13 @@
 
 import subprocess
 import os
+import sys
 from pathlib import Path
 
 GAL_ROOT = Path("Data/Gal_Profiles")
 SKIP = {"Draco"}   # keep your explicit skip
 
-def main():
+def main(run_label="default"):
     galaxies = sorted(d.name for d in GAL_ROOT.iterdir() if d.is_dir())
 
     for gal in galaxies:
@@ -22,12 +23,13 @@ def main():
         env["OSPM_GALAXY"] = gal
 
         result = subprocess.run(
-            ["python", "-m", "Data.Data_Prep.DATA_NEW_GAL"],
+            ["python", "-m", "Data.Data_Prep.DATA_NEW_GAL", run_label],
                 env=env,
         )
         if result.returncode != 0:
             print(f"[FAIL] {gal}")
 
 if __name__ == "__main__":
-    main()
+    label = sys.argv[1] if len(sys.argv) > 1 else "default"
+    main(run_label=label)
 

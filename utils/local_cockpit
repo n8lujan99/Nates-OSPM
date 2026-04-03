@@ -1,0 +1,14 @@
+#!/bin/bash
+cd ~/research/Nates-OSPM || exit
+echo "[LOCAL] starting cockpit stack..."
+# optional: kill old ones
+pkill -f Large_Observer_Model.py 2>/dev/null
+pkill -f cockpit_gui.py 2>/dev/null
+# start LOM (visual mode)
+echo "[LOCAL] starting LOM (plots enabled)"
+LOM_MODE=local LOM_SHOW_PLOTS=1 python Cockpit/Large_Observer_Model.py &
+sleep 2
+# start GUI
+echo "[LOCAL] starting GUI"
+python Cockpit/cockpit_gui.py
+echo "[LOCAL] cockpit closed"

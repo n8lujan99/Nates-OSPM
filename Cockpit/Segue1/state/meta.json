@@ -1,0 +1,11 @@
+{
+  "galaxy": "Segue1",
+  "timestamp": "2026-04-02T21:48:18",
+  "n_points": 1040,
+  "support_points": 208,
+  "support_fraction": 0.2,
+  "lom_mode": "local",
+  "gp_plot": {
+    "status": "ok"
+  }
+}

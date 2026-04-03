@@ -5,8 +5,8 @@ import astropy.coordinates as coord
 
 FIELD={ "ra":["ra","RA","RA_ICRS","RAJ2000","RAdeg","RA_deg","RAJ2000_deg"],
         "dec":["dec","DEC","DE_ICRS","DEJ2000","DEdeg","Dec_deg","DEJ2000_deg"],
-        "vlos":["vlos","RV","HRV","VHELIO_AVG","Vlos","Vlos_kms","radial_velocity","radial_velocity_kms"],
-        "vlos_err":["vlos_err","e_RV","e_HRV","VERR","e_Vlos","radial_velocity_error","radial_velocity_err"],
+        "vlos":["vlos","RV","RV1","RVgalah","HRV","VHELIO_AVG","Vlos","Vlos_kms","radial_velocity","radial_velocity_kms"],
+        "vlos_err":["vlos_err","e_RV","e_RV1","e_RVgalah","e_HRV","VERR","e_Vlos","radial_velocity_error","radial_velocity_err"],
         }
 
 def _pick(df,names):

@@ -1,0 +1,101 @@
+{
+  "status": "ok",
+  "galaxy": "Segue1",
+  "timestamp": "2026-04-02T21:48:18",
+  "n_points": 1040,
+  "support_points": 208,
+  "support_fraction": 0.2,
+  "center": {
+    "rho_s": 49.23173723867804,
+    "r_s": 2553.8289912252912,
+    "MBH": 93254.2973769905
+  },
+  "range_16_84": {
+    "rho_s": [
+      35.59301839504168,
+      83.4808084026169
+    ],
+    "r_s": [
+      1640.5924019832705,
+      4108.363177804609
+    ],
+    "MBH": [
+      0.0,
+      949006.6461727777
+    ]
+  },
+  "boundary_pressure": {
+    "rho_s": {
+      "low": 0.0,
+      "high": 0.057692307692307696
+    },
+    "r_s": {
+      "low": 0.014423076923076924,
+      "high": 0.057692307692307696
+    },
+    "MBH": {
+      "low": 0.6538461538461539,
+      "high": 0.04807692307692308
+    }
+  },
+  "evidence": {
+    "chi2": {
+      "global_best": 12.708126667537336,
+      "global_median": 17.696599075821585,
+      "subset_best": 12.708126667537336,
+      "subset_median": 13.602591602072486,
+      "subset_std": 0.17433350371926104
+    },
+    "spread": {
+      "rho_s": {
+        "lo": 35.59301839504168,
+        "hi": 83.4808084026169,
+        "width": 47.88779000757522
+      },
+      "r_s": {
+        "lo": 1640.5924019832705,
+        "hi": 4108.363177804609,
+        "width": 2467.7707758213387
+      },
+      "MBH": {
+        "lo": 0.0,
+        "hi": 949006.6461727777,
+        "width": 949006.6461727777
+      }
+    },
+    "correlation_vs_chi2": {
+      "rho_s": -0.07273938580641638,
+      "r_s": 0.40089876327287954,
+      "MBH": -0.18223937759183145
+    }
+  },
+  "gp_shape_hint": "flat_or_unresolved",
+  "gp_curvature_proxy": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "notes": [
+    "dataset: 1040 pass rows \u2014 top 20.0% (208 models) form the support cloud",
+    "chi2: global_best=12.71  subset_best=12.71  subset_median=13.6",
+    "GP landscape: flat_or_unresolved \u2014 GP surface is flat \u2014 chi2 is not constraining here yet, sample more broadly",
+    "  GP curvature rho_s: flat \u2014 no curvature detected",
+    "  GP curvature r_s: flat \u2014 no curvature detected",
+    "  GP curvature MBH: flat \u2014 no curvature detected",
+    "rho_s: center=49.23  16-84 range=[35.59, 83.48]  spread~97.3% of center",
+    "r_s: center=2554  16-84 range=[1641, 4108]  spread~96.6% of center",
+    "  mild chi2 trend (r=0.40): higher values slightly preferred",
+    "MBH: center=9.325e+04  16-84 range=[0, 9.49e+05]  spread~1017.7% of center",
+    "WARNING MBH: 65% of support cloud near LOWER edge \u2014 true minimum may be outside bounds, expand lower limit",
+    "suggested bounds for next run (written to patch):",
+    "  rho_s: [4.912, 99.43]  center=49.23",
+    "  r_s: [800, 5000]  center=2554",
+    "  MBH: [0, 1.5e+06]  center=9.325e+04",
+    "ACTION: landscape unresolved \u2014 run more samples before narrowing bounds"
+  ],
+  "config_patch_text": "# --- LOM suggested region update for Segue1 ---\n# generated: 2026-04-02T21:48:18\n\"PARAMETER_NAMES\": [\"rho_s\", \"r_s\", \"MBH\"],\n\"INITIAL_THETA\": [49.23, 2554.0, 9.325e+04],\n\"THETA_BOUNDS\": [\n   (4.912, 99.43),      # rho_s\n   (800.0, 5000.0),    # r_s\n   (0.0, 1.500e+06),      # MBH\n],",
+  "config_patch_cmd": "#!/bin/bash\n\ncd /home/nate/research/Nates-OSPM\ncat <<'EOF' >> Data/Gal_Profiles/Segue1/Segue1_OSPM_Config.py\n# --- LOM suggested region update for Segue1 ---\n# generated: 2026-04-02T21:48:18\n\"PARAMETER_NAMES\": [\"rho_s\", \"r_s\", \"MBH\"],\n\"INITIAL_THETA\": [49.23, 2554.0, 9.325e+04],\n\"THETA_BOUNDS\": [\n   (4.912, 99.43),      # rho_s\n   (800.0, 5000.0),    # r_s\n   (0.0, 1.500e+06),      # MBH\n],\nEOF\n",
+  "deck_path": "/home/nate/research/Nates-OSPM/Data/Gal_Profiles/Segue1/default/daemon_deck_local.csv",
+  "config_path": "/home/nate/research/Nates-OSPM/Data/Gal_Profiles/Segue1/Segue1_OSPM_Config.py",
+  "lom_mode": "local"
+}

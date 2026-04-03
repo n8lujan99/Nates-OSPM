@@ -1,0 +1,14 @@
+#!/bin/bash
+
+cd /home/nate/research/Nates-OSPM
+cat <<'EOF' >> Data/Gal_Profiles/Segue1/Segue1_OSPM_Config.py
+# --- LOM suggested region update for Segue1 ---
+# generated: 2026-04-02T21:48:18
+"PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
+"INITIAL_THETA": [49.23, 2554.0, 9.325e+04],
+"THETA_BOUNDS": [
+   (4.912, 99.43),      # rho_s
+   (800.0, 5000.0),    # r_s
+   (0.0, 1.500e+06),      # MBH
+],
+EOF

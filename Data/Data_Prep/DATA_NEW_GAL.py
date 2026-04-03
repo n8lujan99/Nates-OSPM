@@ -24,6 +24,7 @@ def main(*, run_label="default", write=True):
         PROFILE_ROOT=PROFILE_ROOT,
         CONFIG=CONFIG,
         scratch=not write,
+        run_label=run_label,
     )
 
     print(f"[DATA] raw sources: {len(df_raw)} rows")
@@ -97,4 +98,6 @@ def main(*, run_label="default", write=True):
 
 
 if __name__ == "__main__":
-    main(run_label="default", write=True)
+    import sys
+    label = sys.argv[1] if len(sys.argv) > 1 else "default"
+    main(run_label=label, write=True)

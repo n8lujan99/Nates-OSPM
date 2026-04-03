@@ -11,6 +11,8 @@ from astroquery.simbad import Simbad
 from astroquery.ned import Ned
 from .Data_Paths import build_data_paths
 from .Data_Asmbl import assemble_source
+from .Spec_Registry import SPEC_REGISTRY
+import re
 
 # ------------------------------------------------------------
 def frac_err(v, e):
@@ -66,23 +68,28 @@ def _vizier_cone(cols, catalog, src, *, ra0_deg, dec0_deg, radius_deg):
     return assemble_source(r[0].to_pandas(), src=src)
 
 def src_sdss(*, ra0_deg, dec0_deg, radius_deg):
+    # SDSS on Vizier only has redshifts (zsp), not stellar RVs.
+    # DR16 (V/154/sdss16) is the same — no RV column.
+    # Kept for completeness; returns empty for stellar work.
     return _vizier_cone(
         ["RA_ICRS", "DE_ICRS", "RV", "e_RV"],
-        "V/147/sdss12",
+        "V/154/sdss16",
         "sdss",
         ra0_deg=ra0_deg, dec0_deg=dec0_deg, radius_deg=radius_deg)
 
 
 def src_lamost(*, ra0_deg, dec0_deg, radius_deg):
+    # V/164/dr5 is the latest LAMOST release on Vizier (DR5, ~9M spectra)
     return _vizier_cone(
-        ["RAJ2000", "DEJ2000", "RV", "e_RV"],
-        "V/164/lamost",
+        ["RAJ2000", "DEJ2000", "HRV", "e_HRV"],
+        "V/164/dr5",
         "lamost",
         ra0_deg=ra0_deg, dec0_deg=dec0_deg, radius_deg=radius_deg
     )
 
 
 def src_apogee(*, ra0_deg, dec0_deg, radius_deg):
+    # III/284/allstars — APOGEE-2 DR16 (473K stars, still latest on Vizier)
     return _vizier_cone(
         ["RA", "DEC", "VHELIO_AVG", "VERR"],
         "III/284/allstars",
@@ -92,15 +99,17 @@ def src_apogee(*, ra0_deg, dec0_deg, radius_deg):
 
 
 def src_galah(*, ra0_deg, dec0_deg, radius_deg):
+    # GALAH DR4 (J/A+A/703/A104, 917K stars, 2025)
     return _vizier_cone(
-        ["RA_ICRS", "DE_ICRS", "RV", "e_RV"],
-        "III/263/galah",
+        ["RAJ2000", "DEJ2000", "RV1", "e_RV1"],
+        "J/A+A/703/A104/catalog",
         "galah",
         ra0_deg=ra0_deg, dec0_deg=dec0_deg, radius_deg=radius_deg
     )
 
 
 def src_rave(*, ra0_deg, dec0_deg, radius_deg):
+    # RAVE DR6 — final release
     return _vizier_cone(
         ["RA_ICRS", "DE_ICRS", "RV", "e_RV"],
         "III/272/ravedr6",
@@ -118,9 +127,77 @@ def src_ned(*, ra0_deg, dec0_deg, radius_deg):
 
 
 # ------------------------------------------------------------
-# Spectroscopy handling (unchanged)
+# Registry-based spectroscopy (dedicated studies per galaxy)
 # ------------------------------------------------------------
-def build_spec_collapsed(spec_path, *, arcsec=1.0, scratch=False):
+def src_registry(galaxy_name, *, ra0_deg, dec0_deg, radius_deg):
+    """Query all Vizier catalogs registered for *galaxy_name*."""
+    entries = SPEC_REGISTRY.get(galaxy_name, [])
+    if not entries:
+        return pd.DataFrame()
+
+    frames = []
+    for spec in entries:
+        try:
+            cat = spec["catalog"]
+            v = Vizier(columns=["**"], row_limit=-1)
+            c = coord.SkyCoord(ra0_deg * u.deg, dec0_deg * u.deg)
+            r = v.query_region(c, radius=radius_deg * u.deg, catalog=cat)
+            if not r:
+                print(f"[registry] {spec['ref']}: no data")
+                continue
+
+            df = r[0].to_pandas()
+
+            # Filter by target pattern if needed
+            tcol = spec.get("target_col")
+            tpat = spec.get("target_pat")
+            if tcol and tpat and tcol in df.columns:
+                mask = df[tcol].astype(str).str.contains(tpat, flags=re.IGNORECASE, na=False)
+                df = df[mask].reset_index(drop=True)
+                if df.empty:
+                    print(f"[registry] {spec['ref']}: 0 rows after target filter")
+                    continue
+
+            # Build output with explicit column mapping
+            out = pd.DataFrame()
+            ra_c = spec["ra_col"]
+            dec_c = spec["dec_col"]
+            v_c = spec["v_col"]
+            ve_c = spec.get("v_err_col")
+
+            # Try specified columns, fall back to Vizier computed _RA/_DE
+            if ra_c in df.columns:
+                out["ra"] = pd.to_numeric(df[ra_c], errors="coerce")
+            elif "_RA" in df.columns:
+                out["ra"] = pd.to_numeric(df["_RA"], errors="coerce")
+            if dec_c in df.columns:
+                out["dec"] = pd.to_numeric(df[dec_c], errors="coerce")
+            elif "_DE" in df.columns:
+                out["dec"] = pd.to_numeric(df["_DE"], errors="coerce")
+            if v_c in df.columns:
+                out["vlos"] = pd.to_numeric(df[v_c], errors="coerce")
+            if ve_c and ve_c in df.columns:
+                out["vlos_err"] = pd.to_numeric(df[ve_c], errors="coerce").abs()
+
+            out["src"] = spec["ref"]
+            out = out.dropna(subset=["ra", "dec"]).reset_index(drop=True)
+            if not out.empty:
+                print(f"[registry] {spec['ref']}: {len(out)} rows, "
+                      f"{out['vlos'].notna().sum()} with vlos")
+                frames.append(out)
+
+        except Exception as e:
+            print(f"[registry] {spec['ref']} failed: {e}")
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True, sort=False)
+
+
+# ------------------------------------------------------------
+# Spectroscopy handling (survey-based)
+# ------------------------------------------------------------
+def build_spec_collapsed(spec_path, *, ra0_deg, dec0_deg, radius_deg, arcsec=1.0, scratch=False):
     dfs = [
         src_sdss, src_lamost, src_apogee,
         src_galah, src_rave
@@ -128,11 +205,12 @@ def build_spec_collapsed(spec_path, *, arcsec=1.0, scratch=False):
     rows = []
     for fn in dfs:
         try:
-            d = fn()
+            d = fn(ra0_deg=ra0_deg, dec0_deg=dec0_deg, radius_deg=radius_deg)
             if d is not None and not d.empty:
                 rows.append(d)
-        except Exception:
-            pass
+                print(f"[spec] {fn.__name__}: {len(d)} rows")
+        except Exception as e:
+            print(f"[spec] {fn.__name__} failed: {e}")
 
     if not rows:
         return pd.DataFrame()
@@ -187,12 +265,13 @@ def build_spec_collapsed(spec_path, *, arcsec=1.0, scratch=False):
     return out
 
 
-def src_local_spec(p, *, scratch=False, build_if_missing=True):
+def src_local_spec(p, *, ra0_deg, dec0_deg, radius_deg, scratch=False, build_if_missing=True):
     if p is None:
         return pd.DataFrame()
     if not os.path.exists(p):
         if build_if_missing:
-            return build_spec_collapsed(p, scratch=scratch)
+            return build_spec_collapsed(p, ra0_deg=ra0_deg, dec0_deg=dec0_deg,
+                                        radius_deg=radius_deg, scratch=scratch)
         return pd.DataFrame()
     return assemble_source(pd.read_csv(p), src="local", parse_sexagesimal=True)
 
@@ -200,9 +279,9 @@ def src_local_spec(p, *, scratch=False, build_if_missing=True):
 # ------------------------------------------------------------
 # Final catalog builder (geometry injected here)
 # ------------------------------------------------------------
-def build_sources_catalog(*, PROFILE_ROOT, CONFIG, scratch=False, collapse=True):
+def build_sources_catalog(*, PROFILE_ROOT, CONFIG, scratch=False, collapse=True, run_label="default"):
 
-    paths = build_data_paths(PROFILE_ROOT)
+    paths = build_data_paths(PROFILE_ROOT, run_label=run_label)
     DATA_CSV  = paths["DATA_CSV"]
     SPEC_PATH = paths["SPEC_PATH"]
 
@@ -210,18 +289,31 @@ def build_sources_catalog(*, PROFILE_ROOT, CONFIG, scratch=False, collapse=True)
     dec0   = CONFIG["DEC0_DEG"]
     radius = CONFIG["RADIUS_DEG"]
 
+    galaxy_name = CONFIG.get("GALAXY", "")
+
     # ------------------------------------------------------------
-    # 1. Load spectroscopy FIRST (authoritative if present)
+    # 1a. Registry-based spectroscopy (dedicated studies)
     # ------------------------------------------------------------
-    spec = src_local_spec(SPEC_PATH, scratch=scratch)
+    registry_spec = src_registry(galaxy_name, ra0_deg=ra0, dec0_deg=dec0,
+                                  radius_deg=radius)
+
+    # ------------------------------------------------------------
+    # 1b. Local spectroscopy (hand-curated, authoritative)
+    # ------------------------------------------------------------
+    spec = src_local_spec(SPEC_PATH, ra0_deg=ra0, dec0_deg=dec0,
+                          radius_deg=radius, scratch=scratch)
 
     dfs = []
-    has_spec = spec is not None and not spec.empty
-    if has_spec:
+    has_spec = False
+    if spec is not None and not spec.empty:
         dfs.append(spec)
+        has_spec = True
+    if registry_spec is not None and not registry_spec.empty:
+        dfs.append(registry_spec)
+        has_spec = True
 
     # ------------------------------------------------------------
-    # 2. Load cone-search catalogs
+    # 2. Load cone-search catalogs (surveys)
     # ------------------------------------------------------------
     dfs += [
         src_gaia(ra0_deg=ra0, dec0_deg=dec0, radius_deg=radius),
@@ -242,9 +334,7 @@ def build_sources_catalog(*, PROFILE_ROOT, CONFIG, scratch=False, collapse=True)
     # ------------------------------------------------------------
     if has_spec and "vlos" in raw:
         raw = raw[
-            raw["src"].eq("local") |
-            raw["src"].ne("gaia") |
-            raw["vlos"].notna()
+            ~(raw["src"].eq("gaia") & raw["vlos"].isna())
         ].reset_index(drop=True)
 
     # ------------------------------------------------------------

@@ -1,0 +1,5 @@
+#!/bin/bash
+cd ~/research/Nates-OSPM || exit
+echo "[HPC] starting LOM (headless mode)"
+export LOM_MODE=hpc
+python Cockpit/Large_Observer_Model.py

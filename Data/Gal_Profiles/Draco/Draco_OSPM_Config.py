@@ -45,11 +45,11 @@ CONFIG = {
     "PAR_SNR_MIN":  5.0,
 
     "STAR_R_COL":      "r_pc",
-    "STAR_V_COL":      "radial_velocity",
-    "STAR_VERR_COL":   "radial_velocity_error",
-    "RA_COL":          "RA_deg",
-    "DEC_COL":         "Dec_deg",
-    "VLOS_COL":        "radial_velocity",
+    "STAR_V_COL":      "vlos",
+    "STAR_VERR_COL":   "vlos_err",
+    "RA_COL":          "ra",
+    "DEC_COL":         "dec",
+    "VLOS_COL":        "vlos",
 
     "NORBIT":              2500, 
     "BINNING": {
