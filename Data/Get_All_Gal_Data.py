@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 GAL_ROOT = Path("Data/Gal_Profiles")
-SKIP = {"Draco"}   # keep your explicit skip
+SKIP = {"Draco", "Segue1", "segue1", "Segue1_v3"}   # already have v3 data / not a real galaxy
 
 def main(run_label="default"):
     galaxies = sorted(d.name for d in GAL_ROOT.iterdir() if d.is_dir())

@@ -273,7 +273,10 @@ def src_local_spec(p, *, ra0_deg, dec0_deg, radius_deg, scratch=False, build_if_
             return build_spec_collapsed(p, ra0_deg=ra0_deg, dec0_deg=dec0_deg,
                                         radius_deg=radius_deg, scratch=scratch)
         return pd.DataFrame()
-    return assemble_source(pd.read_csv(p), src="local", parse_sexagesimal=True)
+    try:
+        return assemble_source(pd.read_csv(p), src="local", parse_sexagesimal=True)
+    except Exception:
+        return pd.DataFrame()
 
 
 # ------------------------------------------------------------
