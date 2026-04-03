@@ -1,0 +1,21 @@
+echo $SLURM_JOB_ID
+unset SLURM_JOB_ID
+echo $SLURM_JOB_ID
+srun -p anantuabhg -A mez653 -N 1 -n 1 -c 80 --time=02:00:00 --pty bash
+echo $SLURM_CPUS_PER_TASK
+module purge
+module load julia/1.10.9
+source .venv/bin/activate
+export JULIA_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export PYTHON_JULIACALL_HANDLE_SIGNALS=yes
+export OSPM_USE_JULIA=1
+hostname
+which julia
+which python
+echo $JULIA_NUM_THREADS
+python - <<EOF
+from juliacall import Main
+print("Julia threads:", Main.Threads.nthreads())
+EOF
+bash utils/start
+
