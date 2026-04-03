@@ -308,20 +308,23 @@ function integrate_orbit_rk4(; ic, xLz, orbit_ctx, nsteps=DEFAULT_NSTEPS, stop_r
     vr0     = length(ic)>=4 ? f64(ic[4]) : 0.0
     vtheta0 = length(ic)>=5 ? f64(ic[5]) : 0.0
     state = SVector(r0,theta0,vr0,vtheta0)
-    r      = Float64[]
-    vr     = Float64[]
-    theta  = Float64[]
-    vtheta = Float64[]
+    ns = Int(nsteps)
+    r      = Vector{Float64}(undef, ns)
+    vr     = Vector{Float64}(undef, ns)
+    theta  = Vector{Float64}(undef, ns)
+    vtheta = Vector{Float64}(undef, ns)
     rmax_stop = 10.0 * f64(orbit_ctx.R_pos[end])
-    @inbounds for step in 1:Int(nsteps)
+    actual = 0
+    @inbounds for step in 1:ns
         !all(isfinite,state) && break
         rr = state[1]
         tr = state[2]
         (rr<=rmin_stop || rr>=rmax_stop || abs(tr)>1e6) && break
-        push!(r,rr)
-        push!(vr,state[3])
-        push!(theta,tr)
-        push!(vtheta,state[4])
+        actual += 1
+        r[actual]      = rr
+        vr[actual]     = state[3]
+        theta[actual]  = tr
+        vtheta[actual] = state[4]
         k1 = derivs(state, xLz, orbit_ctx.frc, orbit_ctx.R_pos)
         k2 = derivs(state + 0.5*dt*k1, xLz, orbit_ctx.frc, orbit_ctx.R_pos)
         k3 = derivs(state + 0.5*dt*k2, xLz, orbit_ctx.frc, orbit_ctx.R_pos)
@@ -329,6 +332,7 @@ function integrate_orbit_rk4(; ic, xLz, orbit_ctx, nsteps=DEFAULT_NSTEPS, stop_r
         state += (dt/6.0)*(k1 + 2k2 + 2k3 + k4)
         state = SVector(state[1], clamp(state[2],1e-6,pi-1e-6), state[3], state[4])
     end
+    resize!(r, actual); resize!(vr, actual); resize!(theta, actual); resize!(vtheta, actual)
     return r, vr, theta, vtheta
 end
 
@@ -495,8 +499,8 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
     function _worker!(rng)
         col_occ  = zeros(Float64, Nbins_occ)
         col_vlos = zeros(Float64, Nvlos)
-        s_arr    = Float64[]
-        vlos_buf = Float64[]
+        s_arr    = Vector{Float64}(undef, nsteps)
+        vlos_buf = Vector{Float64}(undef, nsteps)
 
         while true
             filled_atomic[] >= fill_target && break

@@ -49,9 +49,11 @@ class Deck:
         self.path   = config["CSV_PATH"]
         self.cols   = config["REQUIRE_COLUMNS"]
         self.params = config["PARAMETER_NAMES"]
-        self.flush  = 1
-        #self.flush  = int(config.get("CSV_FLUSH_INTERVAL",50))
+        self.flush  = int(config.get("CSV_FLUSH_INTERVAL", 50))
         self._dirty = 0
+        self._buf   = []
+        self._pbuf  = []
+        self._sbuf  = []
         self._load()
     def _load(self):
         dir_name = os.path.dirname(self.path)
@@ -70,25 +72,50 @@ class Deck:
         if missing:
             raise KeyError(f"Deck missing required columns: {missing}")
         self.df = df[self.cols].copy()
+        self._params_arr = self.df[self.params].values.astype(float)
+        self._status_arr = self.df["status"].values.astype(str)
+    def _flush_buf(self):
+        if not self._buf:
+            return
+        new_df = pd.DataFrame(self._buf, columns=self.cols)
+        self.df = pd.concat([self.df, new_df], ignore_index=True)
+        self._params_arr = self.df[self.params].values.astype(float)
+        self._status_arr = self.df["status"].values.astype(str)
+        self._buf.clear()
+        self._pbuf.clear()
+        self._sbuf.clear()
     def save(self):
+        self._flush_buf()
         self.df.to_csv(self.path,index=False)
         print(f"[Deck] saved {len(self.df)} rows → {self.path}", flush=True)
+    def _all_params(self):
+        if self._pbuf:
+            return np.vstack([self._params_arr, np.array(self._pbuf)])
+        return self._params_arr
+    def _all_status(self):
+        if self._sbuf:
+            return np.concatenate([self._status_arr, np.array(self._sbuf)])
+        return self._status_arr
     def is_forbidden(self, theta, ndp=12):
-        A = np.round(self.df[self.params].values, ndp)
+        A = np.round(self._all_params(), ndp)
         t = np.round(theta, ndp)
         m = (A==t).all(axis=1)
-        return m.any() and (self.df.loc[m,"status"]=="forbidden").any()
+        if not m.any(): return False
+        return (self._all_status()[m]=="forbidden").any()
     def nearest_distance(self, theta, tol):
-        A=self.df[self.params].values.astype(float)
+        A = self._all_params()
         m=np.all(np.abs(A-theta)<tol, axis=1)
         if not m.any(): return np.inf
         return np.linalg.norm(A[m]-theta,axis=1).min()
     def add(self, theta, chi2, reward, pid, status):
-        row={k:theta[i] for i,k in enumerate(self.params)}
-        row |= dict(chi2=chi2,reward=reward,status=status,proposal_id=pid)
-        self.df = pd.concat([self.df, pd.DataFrame([row])], ignore_index=True)
+        row_dict = {k: theta[i] for i, k in enumerate(self.params)}
+        row_dict |= dict(chi2=chi2, reward=reward, status=status, proposal_id=pid)
+        self._buf.append([row_dict.get(k) for k in self.cols])
+        self._pbuf.append([theta[i] for i in range(len(self.params))])
+        self._sbuf.append(status)
         self._dirty+=1
         if self._dirty>=self.flush:
+            self._flush_buf()
             self.save(); self._dirty=0
 # ============================================================
 # Physics wrapper
@@ -129,11 +156,10 @@ class Fixer:
 class FlatDetector:
     def __init__(self,w,eps,p):
         self.w,self.eps,self.p=w,eps,p
-        self.buf=[]; self.cnt=0
+        self.buf=deque(maxlen=w); self.cnt=0
     def push(self,x):
         if not np.isfinite(x): return
         self.buf.append(x)
-        if len(self.buf)>self.w: self.buf.pop(0)
         if len(self.buf)<self.w: self.cnt=0; return
         self.cnt=self.cnt+1 if np.std(self.buf)<self.eps else 0
     def flat(self): return self.cnt>=self.p
@@ -232,6 +258,7 @@ class Runner:
         if not self.ai: return
         df=deck.df[deck.df.status.str.startswith("pass") & np.isfinite(deck.df.reward)]
         if len(df)<200: return
+        if len(df)>5000: df=df.tail(5000)
         X=df[self.cols].values
         y=df.reward.values.reshape(-1,1)
         if not self.scaled:
@@ -280,6 +307,7 @@ def run_daemon(config, physics_engine):
         # ---- propose ----
         print(f"[Daemon] loop iter runs={runs}", flush=True)
         t0    = time.perf_counter()
+        deck._flush_buf()
         base_props = runner.propose(deck)
         props = []
         for theta, pid in base_props:
@@ -393,6 +421,7 @@ def run_daemon(config, physics_engine):
         if stop:
             return
         t0 = time.perf_counter()
+        deck._flush_buf()
         runner.train(deck)
         t_acc["train"] += time.perf_counter() - t0
         t_cnt["train"] += 1

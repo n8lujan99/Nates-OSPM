@@ -274,11 +274,11 @@ class LiveConsole(QtWidgets.QWidget):
         if len(df_full) <= self.last_row:
             return
 
-        new_rows = df_full.iloc[self.last_row:]
+        new_rows = df_full.iloc[self.last_row:].copy()
         self.last_row = len(df_full)
 
         if self.df.empty:
-            self.df = new_rows.copy()
+            self.df = new_rows
         else:
             self.df = pd.concat([self.df, new_rows], ignore_index=True)
 
