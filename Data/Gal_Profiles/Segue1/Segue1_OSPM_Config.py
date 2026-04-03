@@ -62,7 +62,7 @@ CONFIG = {
     # OSPM numerical setup
     # =========================================================
 
-    "NORBIT":              2500,   # RESOLUTION
+    "NORBIT":              200,   # RESOLUTION
     "BINNING": {
         "MIN_BINS":            4,
         "N_TARGET_CIRC":       5,
@@ -76,15 +76,15 @@ CONFIG = {
     # Parameter space
     # =========================================================
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA":   [60.0, 2500.0, 8.5e5],
+    "INITIAL_THETA":   [60.0, 2500.0, 4.5e5],
     "THETA_BOUNDS": [
         (15.0, 100.0),     # rho_s
         (800, 5000.0),    # r_s
-        (6.5e5, 1.05e6),      # MBH
+        (6.5e5, 1.5e6),      # MBH
     ],
 
     # Penalties
-    "PEN_SPHERE_STRENGTH": 200,
+    "PEN_SPHERE_STRENGTH": 2500,
     "PEN_SPHERE_POWER":    2.0,
     "PEN_SLOPE_STRENGTH":  5000,
 

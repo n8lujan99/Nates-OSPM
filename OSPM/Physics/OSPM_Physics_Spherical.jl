@@ -106,38 +106,7 @@ function get_radial_edges(r_centers_m::Vector{Float64})
     unlock(_DATA_LOCK)
     return edges
 end
-# --- Dark matter halo (extend for new halo types) ---
-function rho_interp(rv, halo)
-    r    = abs(rv[1])
-    rhos = halo[:rho_s]
-    rs   = halo[:r_s]
-    x    = r / max(rs, 1e-30)
-    halo[:type] === :nfw &&
-        return rhos / (x * (1 + x)^2 + 1e-30)
-    halo[:type] === :cored &&
-        return rhos / ((1 + x) * (1 + x^2) + 1e-30)
-    halo[:type] === :einasto && begin
-        α = halo[:alpha]          # curvature parameter
-        return rhos * exp(-2/α * (x^α - 1))
-    end
-    error("Unknown halo type: $(halo[:type])")
-end
-function halo_from_theta(rho_s, r_s, MBH; halo_type="nfw", alpha=nothing)
-    ht = Symbol(lowercase(String(halo_type)))
-    h = Dict(
-        :rho_s => f64(rho_s) * Msun / pc^3,
-        :r_s   => f64(r_s)   * pc,
-        :rs    => f64(r_s)   * pc,
-        :MBH   => f64(MBH)   * Msun,
-        :type  => ht,
-        :rmin  => 1e-6 * f64(r_s) * pc
-    )
-    # Optional shape parameter, only used for alt halo types like Einasto. Default value is 0.18 if not provided.
-    if ht === :einasto
-        h[:alpha] = isnothing(alpha) ? 0.18 : f64(alpha)
-    end
-    return h
-end
+
 function tables_spherical(R, nlegup, halo, rhofn)
     halo=normalize_halo(halo); n=length(R)
     rho=similar(R); tabv=zeros(n); tabfr=zeros(n); Menc=zeros(n)
@@ -170,6 +139,126 @@ function tables_spherical(R, nlegup, halo, rhofn)
 
     tabv, tabfr, Menc
 end
+
+function build_halo_context(rho_s, r_s, MBH, halo_type; nR=DEFAULT_NR, rmax_factor=DEFAULT_RMAX_FACTOR)
+    halo=halo_from_theta(rho_s,r_s,MBH; halo_type=halo_type)
+    R=build_R_halo_physical(nR; rmin=halo[:rmin], rmax=rmax_factor*halo[:rs])
+    tabv,tabfr,Menc=tables_spherical(R,1,halo,rho_interp)
+    pot,frc,_=make_potential_force_funcs(halo,R,1,tabv,tabfr,Menc)
+    HaloContext(halo,f64.(R),tabv,tabfr,Menc,pot,frc)
+end
+@inline function _quant(x::Float64; digits::Int=10)
+    return round(x, digits=digits)
+end
+function get_halo_context(rho_s, r_s, MBH, halo_type; nR=DEFAULT_NR, rmax_factor=DEFAULT_RMAX_FACTOR)
+    ht = Symbol(lowercase(String(halo_type)))
+    key = ( _quant(f64(rho_s)), _quant(f64(r_s)), _quant(f64(MBH)), ht, nR, _quant(f64(rmax_factor)))
+    lock(_HALO_LOCK)
+    ctx = get(_HALO_CTX_CACHE, key, nothing)
+    unlock(_HALO_LOCK)
+    ctx !== nothing && return ctx
+    newctx = build_halo_context(rho_s, r_s, MBH, ht; nR=nR, rmax_factor=rmax_factor)
+    lock(_HALO_LOCK)
+    ctx = get(_HALO_CTX_CACHE, key, nothing)
+    if ctx === nothing
+        _HALO_CTX_CACHE[key] = newctx
+        ctx = newctx
+    end
+    unlock(_HALO_LOCK)
+    return ctx
+end
+
+function build_A_matrix_julia(r0_unused, th0, dt, Etot_unused, xLz_unused, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type)
+    build_A_matrix_julia(th0, dt, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type)
+end
+@inline function derivs(s::SVector{4,Float64}, Lz::Float64, frc, R)
+    r,theta,vr,vtheta=s
+    !(isfinite(r)&&isfinite(theta)&&isfinite(vr)&&isfinite(vtheta)) && return SVector(0.0,0.0,0.0,0.0)
+    r_safe=max(abs(r),1e-12)
+    st,ct=_sincos_safe(theta)
+    r_tab=clamp(r_safe,R[1],R[end])
+    fr,_=frc(r_tab,st)
+    !isfinite(fr) && return SVector(0.0,0.0,0.0,0.0)
+    dr=vr
+    dtheta=vtheta/r_safe
+    dvr=(vtheta*vtheta)/r_safe + (Lz*Lz)/(r_safe^3*st*st) + fr
+    dvtheta=(Lz*Lz)*ct/(r_safe^3*st^3) - (vr*vtheta)/r_safe
+    SVector(dr,dtheta,dvr,dvtheta)
+end
+
+function orbit_to_sigma2_profile(; r_arr, th_arr, vr_arr, xLz, dt_orb, sini, r_centers_m, edges)
+    nb=length(r_centers_m)
+    w=zeros(nb); v=zeros(nb); v2=zeros(nb)
+    _dbg_orbit_count[] += 1
+    do_debug = _dbg_orbit_count[] <= 5
+    hits = do_debug ? zeros(Int,nb) : nothing
+    rmin_seen = do_debug ? Inf : 0.0
+    rmax_seen = do_debug ? -Inf : 0.0
+
+    sini=clamp01(f64(sini))
+    phi=0.0
+    @inbounds for i in eachindex(r_arr)
+        rr=max(f64(r_arr[i]),1e-12)
+        th=clamp(f64(th_arr[i]),1e-6,pi-1e-6)
+        vr0=f64(vr_arr[i])
+        ss,_=_sincos_safe(th)
+        vphi=f64(xLz)/(rr*ss)
+        cp,sp=cos(phi),sin(phi)
+        vlos=sini*(vr0*cp - vphi*sp)
+        phi+=f64(xLz)/(rr*rr*ss*ss)*f64(dt_orb)
+        j=searchsortedfirst(edges,rr)-1
+        (j<1 || j>nb) && continue
+        w[j]+=1; v[j]+=vlos; v2[j]+=vlos^2
+        if do_debug
+            hits[j]+=1
+            rmin_seen=min(rmin_seen,rr)
+            rmax_seen=max(rmax_seen,rr)
+        end
+    end
+
+    do_debug && println("BIN_HITS=",hits," rmin/max=",(rmin_seen,rmax_seen)," centers[1/end]=",(r_centers_m[1],r_centers_m[end]))
+    sig2=zeros(nb)
+    @inbounds for j in 1:nb
+        w[j]>0 && (mv=v[j]/w[j]; sig2[j]=v2[j]/w[j]-mv^2)
+    end
+    sig2
+end
+
+
+# --- Dark matter halo (extend for new halo types) ---
+function rho_interp(rv, halo)
+    r    = abs(rv[1])
+    rhos = halo[:rho_s]
+    rs   = halo[:r_s]
+    x    = r / max(rs, 1e-30)
+    halo[:type] === :nfw &&
+        return rhos / (x * (1 + x)^2 + 1e-30)
+    halo[:type] === :cored &&
+        return rhos / ((1 + x) * (1 + x^2) + 1e-30)
+    halo[:type] === :einasto && begin
+        α = halo[:alpha]          # curvature parameter
+        return rhos * exp(-2/α * (x^α - 1))
+    end
+    error("Unknown halo type: $(halo[:type])")
+end
+
+function halo_from_theta(rho_s, r_s, MBH; halo_type="nfw", alpha=nothing)
+    ht = Symbol(lowercase(String(halo_type)))
+    h = Dict(
+        :rho_s => f64(rho_s) * Msun / pc^3,
+        :r_s   => f64(r_s)   * pc,
+        :rs    => f64(r_s)   * pc,
+        :MBH   => f64(MBH)   * Msun,
+        :type  => ht,
+        :rmin  => 1e-6 * f64(r_s) * pc
+    )
+    # Optional shape parameter, only used for alt halo types like Einasto. Default value is 0.18 if not provided.
+    if ht === :einasto
+        h[:alpha] = isnothing(alpha) ? 0.18 : f64(alpha)
+    end
+    return h
+end
+
 function make_potential_force_funcs(halo, R, nlegup, tabv, tabfr, Menc)
     halo=normalize_halo(halo); MBH=f64(halo[:MBH]); rmin=f64(halo[:rmin])
     rlgmin=log10(f64(R[1])); rlgmax=log10(f64(R[end])); np=length(R)
@@ -202,56 +291,14 @@ function make_potential_force_funcs(halo, R, nlegup, tabv, tabfr, Menc)
 
     pot, frc, R
 end
-function build_halo_context(rho_s, r_s, MBH, halo_type; nR=DEFAULT_NR, rmax_factor=DEFAULT_RMAX_FACTOR)
-    halo=halo_from_theta(rho_s,r_s,MBH; halo_type=halo_type)
-    R=build_R_halo_physical(nR; rmin=halo[:rmin], rmax=rmax_factor*halo[:rs])
-    tabv,tabfr,Menc=tables_spherical(R,1,halo,rho_interp)
-    pot,frc,_=make_potential_force_funcs(halo,R,1,tabv,tabfr,Menc)
-    HaloContext(halo,f64.(R),tabv,tabfr,Menc,pot,frc)
-end
-@inline function _quant(x::Float64; digits::Int=10)
-    return round(x, digits=digits)
-end
-function get_halo_context(rho_s, r_s, MBH, halo_type; nR=DEFAULT_NR, rmax_factor=DEFAULT_RMAX_FACTOR)
-    ht = Symbol(lowercase(String(halo_type)))
-    key = ( _quant(f64(rho_s)), _quant(f64(r_s)), _quant(f64(MBH)), ht, nR, _quant(f64(rmax_factor)))
-    lock(_HALO_LOCK)
-    ctx = get(_HALO_CTX_CACHE, key, nothing)
-    unlock(_HALO_LOCK)
-    ctx !== nothing && return ctx
-    newctx = build_halo_context(rho_s, r_s, MBH, ht; nR=nR, rmax_factor=rmax_factor)
-    lock(_HALO_LOCK)
-    ctx = get(_HALO_CTX_CACHE, key, nothing)
-    if ctx === nothing
-        _HALO_CTX_CACHE[key] = newctx
-        ctx = newctx
-    end
-    unlock(_HALO_LOCK)
-    return ctx
-end
+
 mass_enclosed_two_radii(rin,rout,rho_s,r_s,MBH,halo_type)=begin
     ctx=get_halo_context(rho_s,r_s,MBH,halo_type)
     r1=max(rin,ctx.halo[:rmin]); r2=max(rout,1.001*r1)
     fr1,_=ctx.frc(r1,0.0); fr2,_=ctx.frc(r2,0.0)
     (-r1*r1*fr1/G, -r2*r2*fr2/G)
 end
-function build_A_matrix_julia(r0_unused, th0, dt, Etot_unused, xLz_unused, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type)
-    build_A_matrix_julia(th0, dt, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type)
-end
-@inline function derivs(s::SVector{4,Float64}, Lz::Float64, frc, R)
-    r,theta,vr,vtheta=s
-    !(isfinite(r)&&isfinite(theta)&&isfinite(vr)&&isfinite(vtheta)) && return SVector(0.0,0.0,0.0,0.0)
-    r_safe=max(abs(r),1e-12)
-    st,ct=_sincos_safe(theta)
-    r_tab=clamp(r_safe,R[1],R[end])
-    fr,_=frc(r_tab,st)
-    !isfinite(fr) && return SVector(0.0,0.0,0.0,0.0)
-    dr=vr
-    dtheta=vtheta/r_safe
-    dvr=(vtheta*vtheta)/r_safe + (Lz*Lz)/(r_safe^3*st*st) + fr
-    dvtheta=(Lz*Lz)*ct/(r_safe^3*st^3) - (vr*vtheta)/r_safe
-    SVector(dr,dtheta,dvr,dvtheta)
-end
+
 function integrate_orbit_rk4(; ic, xLz, orbit_ctx, nsteps=DEFAULT_NSTEPS, stop_rmin_factor=DEFAULT_STOP_RMIN_FACTOR)
     halo = orbit_ctx.halo
     rmin_stop = stop_rmin_factor * f64(halo[:rmin])
@@ -261,9 +308,10 @@ function integrate_orbit_rk4(; ic, xLz, orbit_ctx, nsteps=DEFAULT_NSTEPS, stop_r
     vr0     = length(ic)>=4 ? f64(ic[4]) : 0.0
     vtheta0 = length(ic)>=5 ? f64(ic[5]) : 0.0
     state = SVector(r0,theta0,vr0,vtheta0)
-    r     = Float64[]
-    vr    = Float64[]
-    theta = Float64[]
+    r      = Float64[]
+    vr     = Float64[]
+    theta  = Float64[]
+    vtheta = Float64[]
     rmax_stop = 10.0 * f64(orbit_ctx.R_pos[end])
     @inbounds for step in 1:Int(nsteps)
         !all(isfinite,state) && break
@@ -273,6 +321,7 @@ function integrate_orbit_rk4(; ic, xLz, orbit_ctx, nsteps=DEFAULT_NSTEPS, stop_r
         push!(r,rr)
         push!(vr,state[3])
         push!(theta,tr)
+        push!(vtheta,state[4])
         k1 = derivs(state, xLz, orbit_ctx.frc, orbit_ctx.R_pos)
         k2 = derivs(state + 0.5*dt*k1, xLz, orbit_ctx.frc, orbit_ctx.R_pos)
         k3 = derivs(state + 0.5*dt*k2, xLz, orbit_ctx.frc, orbit_ctx.R_pos)
@@ -280,44 +329,35 @@ function integrate_orbit_rk4(; ic, xLz, orbit_ctx, nsteps=DEFAULT_NSTEPS, stop_r
         state += (dt/6.0)*(k1 + 2k2 + 2k3 + k4)
         state = SVector(state[1], clamp(state[2],1e-6,pi-1e-6), state[3], state[4])
     end
-    return r, vr, theta
+    return r, vr, theta, vtheta
 end
-function orbit_to_sigma2_profile(; r_arr, th_arr, vr_arr, xLz, r_centers_m, edges, sini)
-    nb=length(r_centers_m)
-    w=zeros(nb); v=zeros(nb); v2=zeros(nb)
-    _dbg_orbit_count[] += 1
-    do_debug = _dbg_orbit_count[] <= 5
-    hits = do_debug ? zeros(Int,nb) : nothing
-    rmin_seen = do_debug ? Inf : 0.0
-    rmax_seen = do_debug ? -Inf : 0.0
 
-    sini=f64(sini); sini=clamp01(sini)
-    cosi=sqrt(max(1.0 - sini*sini, 0.0))
 
-    @inbounds for i in eachindex(r_arr)
-        rr=max(f64(r_arr[i]),1e-12)
-        th=clamp(f64(th_arr[i]),1e-6,pi-1e-6)
-        vr0=f64(vr_arr[i])
-        ss,_=_sincos_safe(th)
-        vphi=f64(xLz)/(rr*ss)
-        vlos=sini*vr0 + cosi*vphi
-        j=searchsortedfirst(edges,rr)-1
-        (j<1 || j>nb) && continue
-        w[j]+=1; v[j]+=vlos; v2[j]+=vlos^2
-        if do_debug
-            hits[j]+=1
-            rmin_seen=min(rmin_seen,rr)
-            rmax_seen=max(rmax_seen,rr)
-        end
-    end
 
-    do_debug && println("BIN_HITS=",hits," rmin/max=",(rmin_seen,rmax_seen)," centers[1/end]=",(r_centers_m[1],r_centers_m[end]))
-    sig2=zeros(nb)
-    @inbounds for j in 1:nb
-        w[j]>0 && (mv=v[j]/w[j]; sig2[j]=v2[j]/w[j]-mv^2)
-    end
-    sig2
-end
+
+
+
+
+
+
+
+# UNDER CONSTRUCTION: the following functions are in active development and may be subject to significant changes. Please consult with Nate before making any modifications to these sections.
+#########################################################################################################################
+
+#########################################################################################################################
+
+#########################################################################################################################
+
+
+
+
+
+
+
+
+
+
+
 function launch_orbit_apocenter(; rapo::Float64, theta0::Float64, Lz_frac::Float64,
     pot, frc, r0_frac::Float64=DEFAULT_R0_FRAC, dt_frac::Float64=DEFAULT_DT_FRAC, dt_floor::Float64=DEFAULT_DT_FLOOR,
     debug::Bool=true)
@@ -389,13 +429,16 @@ function local_spacing(R_sorted, Ri)
     end
 end
 
+
+
+
 # Main A-matrix builder: maps orbital weights → observables (vlos likelihoods + occupancy). Parallel, numerically hardened.
 # DO NOT MODIFY without consulting Nate.
 function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64},
         verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64,
         halo_type::String; nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC,
         dt_frac_orbit::Float64=DEFAULT_DT_FRAC, dR_frac::Float64=DEFAULT_DR_FRAC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS,
-        diag::Bool=false, threaded::Bool=true)
+        diag::Bool=false, threaded::Bool=true, fill_pct::Float64=0.95)
 
 
     Nstar = length(R_star_m)
@@ -415,7 +458,6 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
     Nvlos = length(vlos_idx)
     ctx   = get_halo_context(rho_s, r_s, MBH, halo_type)
     sini  = clamp01(f64(sini))
-    cosi  = sqrt(max(1.0 - sini * sini, 0.0))
 
     Rmin  = minimum(R_star_m)
     Rmax  = maximum(R_star_m)
@@ -446,17 +488,18 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
         _orbit_cost[c] = lf * rapo      # low = expensive (radial + deep)
     end
     cost_order = sortperm(_orbit_cost; rev=true)   # descending: expensive orbits dispatched first
-    # -----------------------------------------------------------------------
     next_orbit = Threads.Atomic{Int}(1)
     filled_atomic = Threads.Atomic{Int}(0)
+    fill_target = round(Int, fill_pct * Norbit)
 
     function _worker!(rng)
         col_occ  = zeros(Float64, Nbins_occ)
         col_vlos = zeros(Float64, Nvlos)
         s_arr    = Float64[]
-        vphi_arr = Float64[]
+        vlos_buf = Float64[]
 
         while true
+            filled_atomic[] >= fill_target && break
             c_seq = Threads.atomic_add!(next_orbit, 1)
             c_seq > Norbit && break
             c_claim = cost_order[c_seq]
@@ -468,19 +511,24 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
             r0_frac = 0.95 + 0.04 * rand(rng)
             ic, Lz0, E0, vc, st = launch_orbit_apocenter(rapo=rapo, theta0=theta0, Lz_frac=f64(lf), pot=ctx.pot, frc=ctx.frc, r0_frac=r0_frac, dt_frac=dt_frac_orbit)
             st != :ok && continue
-            r, vr, theta = integrate_orbit_rk4(ic=ic, xLz=Lz0, orbit_ctx=orbit_ctx, nsteps=nsteps)
+            r, vr, theta, vtheta = integrate_orbit_rk4(ic=ic, xLz=Lz0, orbit_ctx=orbit_ctx, nsteps=nsteps)
             isempty(r) && continue
             success_flags[c_claim] = true
             rapo_list[c_claim]     = rapo
             min_r_reached[c_claim] = minimum(r)
             Nhits    = length(r)
+            dt_orb   = f64(ic[3])
             resize!(s_arr,Nhits)
-            resize!(vphi_arr,Nhits)
+            resize!(vlos_buf,Nhits)
+            phi = 0.0
             @inbounds for i in 1:Nhits
                 si          = _ssin(f64(theta[i]))
                 ri          = f64(r[i])
                 s_arr[i]    = ri * si
-                vphi_arr[i] = f64(Lz0) / (ri * si)
+                vphi_i      = f64(Lz0) / (ri * si)
+                cp, sp      = cos(phi), sin(phi)
+                vlos_buf[i] = sini * (f64(vr[i]) * cp - vphi_i * sp)
+                phi        += f64(Lz0) / (ri * ri * si * si) * dt_orb
             end
 
             fill!(col_occ,0.0)
@@ -498,10 +546,9 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
             end
 
             if Nvlos > 0
-                vlos_arr    = @. sini * f64(vr) + cosi * vphi_arr
                 pidx        = sortperm(s_arr)
                 s_sorted    = s_arr[pidx]
-                vlos_sorted = vlos_arr[pidx]
+                vlos_sorted = vlos_buf[pidx]
                 inv_sqrt2pi = inv(sqrt(2 * pi))
                 @inbounds for row in 1:Nvlos
                     istar = vlos_idx[row]
@@ -615,171 +662,10 @@ function build_A_matrix_hybrid( Norbit::Int, R_star_m::Vector{Float64}, has_vlos
     return diag ? (A, Dict("filled" => filled, "attempts" => Norbit)) : A
 end
 
-# Back-compat: old name. Treats all stars as having vlos.
-function build_A_matrix_stellar(Norbit::Int, R_star_m::Vector{Float64}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64},
-        sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC, dt_frac_orbit::Float64=DEFAULT_DT_FRAC,
-        dR_frac::Float64=DEFAULT_DR_FRAC, dR_floor_frac::Float64=DEFAULT_DR_FLOOR_FRAC, dR_floor_pc::Float64=DEFAULT_DR_FLOOR_PC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS, diag::Bool=false)
-    
-    has_vlos = trues(length(R_star_m))
-    build_A_matrix_hybrid(Norbit, R_star_m, has_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, halo_type; nsteps=nsteps, Lfrac=Lfrac, dt_frac_orbit=dt_frac_orbit,
-            dR_frac=dR_frac, Nbins_occ=Nbins_occ, return_occ=return_occ, max_attempts_factor=max_attempts_factor, diag=diag)
-end
-function get_orbit_template(shells::Vector{Float64}, Lfrac::NTuple{N,Float64}) where N
-    key = _orbit_template_key(shells, Lfrac)
-    lock(_DATA_LOCK)
-    tpl = get(_ORBIT_TEMPLATE_CACHE, key, nothing)
-    unlock(_DATA_LOCK)
-    tpl !== nothing && return tpl
-    rapos = Float64[]
-    lvals = Float64[]
-    for r in shells
-        rr = f64(r)
-        for lf in Lfrac
-            push!(rapos, rr)
-            push!(lvals, f64(lf))
-        end
-    end
-    tpl = (rapos, lvals)
-    lock(_DATA_LOCK)
-    _ORBIT_TEMPLATE_CACHE[key] = tpl
-    unlock(_DATA_LOCK)
-    return tpl
-end
-function build_A_matrix_from_ctx(ctx::HaloContext, th0, dt, r_centers_m, valid, sini, nsteps)
-    shells        = r_centers_m[valid]
-    Ndat          = length(shells)
-    theta0        = f64(th0[1])
-    theta_hash    = hash((ctx.halo[:rho_s], ctx.halo[:r_s], ctx.halo[:MBH]))
-    rng           = MersenneTwister(UInt(theta_hash))
-    dt_frac_orbit = DEFAULT_DT_FRAC
-    Lfrac         = DEFAULT_LFRAC
-    # Cached orbit launch grid
-    rapos, lvals  = get_orbit_template(shells, Lfrac)
-    Norbit        = length(rapos)
-    A             = zeros(Float64, Ndat, Norbit)
-    edges         = get_radial_edges(r_centers_m)
-    orbit_ctx     = (frc = ctx.frc, R_pos = ctx.R, halo = ctx.halo)
-    col           = 1
-    @inbounds for idx in eachindex(rapos)
-        rapo = rapos[idx]
-        lf   = lvals[idx]
 
-        if !(isfinite(rapo) && rapo > 0.0)
-            col += 1
-            continue
-        end
-        r0_frac = 0.95 + 0.04 * rand(rng)
-        ic, Lz0, E0, vc, st = launch_orbit_apocenter(rapo=rapo, theta0=theta0, Lz_frac=lf, pot=ctx.pot, frc=ctx.frc, r0_frac=r0_frac, dt_frac=dt_frac_orbit)
-        if st != :ok
-            col += 1
-            continue
-        end
-        r, vr, theta = integrate_orbit_rk4(ic=ic, xLz=Lz0, orbit_ctx=orbit_ctx, nsteps=nsteps)
-        isempty(r) && (col += 1; continue)
-        sig2 = orbit_to_sigma2_profile(r_arr=r, th_arr=theta, vr_arr=vr, xLz=Lz0, r_centers_m=r_centers_m, edges=edges, sini=sini)
-        A[:, col] .= sig2[valid]
-        col += 1
-    end
 
-    return A
-end
-build_A_matrix_julia(th0, dt, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type) =
-    build_A_matrix_from_ctx(get_halo_context(rho_s,r_s,MBH,halo_type), th0, dt, r_centers_m, valid, sini, nsteps)
 
-ospm_runcheck(theta, args...) =
-    build_A_matrix_julia(args..., theta[1], theta[2], length(theta)>2 ? theta[3] : 0.0)
 
-# --- Target data for WLS chi^2 (module-global, set once) ---
-const _TARGET_LOCK = ReentrantLock()
-const _TARGET_D  = Ref{Vector{Float64}}(Float64[])
-const _TARGET_W2 = Ref{Vector{Float64}}(Float64[])   # w2 = 1/sigma^2
-function set_target_wls!(d::AbstractVector{<:Real}, sigma::AbstractVector{<:Real})
-    dd = Float64.(d)
-    ss = Float64.(sigma)
-    length(dd) == length(ss) || error("set_target_wls!: d and sigma must match")
-    any(!isfinite, dd) && error("set_target_wls!: non-finite d")
-    any(x->(!(isfinite(x) && x>0.0)), ss) && error("set_target_wls!: sigma must be finite and > 0")
-    w2 = similar(ss)
-    @inbounds for i in eachindex(ss)
-        w2[i] = 1.0 / (ss[i]*ss[i])
-    end
-    lock(_TARGET_LOCK)
-    _TARGET_D[]  = dd
-    _TARGET_W2[] = w2
-    unlock(_TARGET_LOCK)
-    return nothing
-end
-function _get_target_wls()
-    lock(_TARGET_LOCK)
-    d  = _TARGET_D[]
-    w2 = _TARGET_W2[]
-    unlock(_TARGET_LOCK)
-    isempty(d) && error("WLS target not initialized. Call set_target_wls! first.")
-    return d, w2
-end
-# --- Weighted NNLS via projected gradient; minimizes 0.5*Σ w2[i]*((Ax)[i]-d[i])^2 s.t. x≥0 ---
-@inline function _proj_nn!(x::Vector{Float64})
-    @inbounds for i in eachindex(x)
-        x[i] = x[i] < 0.0 ? 0.0 : x[i]
-    end
-    return x
-end
-function _lipschitz_wls(A::Matrix{Float64}, w2::Vector{Float64}; iters::Int=12)
-    m, n = size(A)
-    v  = fill(1.0/sqrt(n), n)
-    Av = zeros(Float64, m)
-    t  = zeros(Float64, m)
-    g  = zeros(Float64, n)
-    for _ in 1:iters
-        mul!(Av, A, v)                          # Av = A*v
-        @inbounds for i in 1:m
-            t[i] = w2[i] * Av[i]                # t = W2*(A*v)
-        end
-        mul!(g, transpose(A), t)                # g = A'*(W2*A*v)
-        ng = norm(g)
-        ng > 0.0 || break
-        @inbounds for j in 1:n
-            v[j] = g[j] / ng
-        end
-    end
-    mul!(Av, A, v)
-    @inbounds for i in 1:m
-        t[i] = w2[i] * Av[i]
-    end
-    mul!(g, transpose(A), t)
-    L = dot(v, g)
-    return max(L, 1e-30)
-end
-function _nnls_wls_pg!(A::Matrix{Float64}, d::Vector{Float64}, w2::Vector{Float64};
-    max_iter::Int=400, tol::Float64=1e-8)
-    m, n = size(A)
-    x    = zeros(Float64, n)
-    xnew = similar(x)
-    g    = similar(x)
-    Ax   = zeros(Float64, m)
-    r    = zeros(Float64, m)
-    t    = zeros(Float64, m)
-    L = _lipschitz_wls(A, w2)
-    α = 1.0 / L
-    for _ in 1:max_iter
-        mul!(Ax, A, x)                          # Ax
-        @inbounds for i in 1:m
-            r[i] = Ax[i] - d[i]                 # r = Ax - d
-            t[i] = w2[i] * r[i]                 # t = W2*r
-        end
-        mul!(g, transpose(A), t)                # g = A'*(W2*(Ax-d))
-        @inbounds for j in 1:n
-            xnew[j] = x[j] - α * g[j]
-        end
-        _proj_nn!(xnew)
-        if norm(xnew .- x) <= tol * max(1.0, norm(x))
-            x .= xnew
-            break
-        end
-        x .= xnew
-    end
-    return x
-end
 
 # Stellar log-likelihood (exact port of Python; no rescaling). A:(Nstar×Norbit), w:(Norbit,), verr [m/s]
 function stellar_log_likelihood_jl( A::Matrix{Float64}, w::Vector{Float64}, verr::Vector{Float64}; rv_mask::Union{Vector{Bool},Nothing}=nothing,
@@ -922,4 +808,194 @@ function evaluate_batch_theta( thetas::AbstractMatrix{<:Real}, R_star_m::Vector{
 
     return status, chi2
 end # function
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#########################################################################################################################
+
+#########################################################################################################################
+
+#########################################################################################################################
+
+
+# Back-compat: old name. Treats all stars as having vlos.
+function build_A_matrix_stellar(Norbit::Int, R_star_m::Vector{Float64}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64},
+        sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC, dt_frac_orbit::Float64=DEFAULT_DT_FRAC,
+        dR_frac::Float64=DEFAULT_DR_FRAC, dR_floor_frac::Float64=DEFAULT_DR_FLOOR_FRAC, dR_floor_pc::Float64=DEFAULT_DR_FLOOR_PC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS, diag::Bool=false)
+    
+    has_vlos = trues(length(R_star_m))
+    build_A_matrix_hybrid(Norbit, R_star_m, has_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, halo_type; nsteps=nsteps, Lfrac=Lfrac, dt_frac_orbit=dt_frac_orbit,
+            dR_frac=dR_frac, Nbins_occ=Nbins_occ, return_occ=return_occ, max_attempts_factor=max_attempts_factor, diag=diag)
+end
+
+function get_orbit_template(shells::Vector{Float64}, Lfrac::NTuple{N,Float64}) where N
+    key = _orbit_template_key(shells, Lfrac)
+    lock(_DATA_LOCK)
+    tpl = get(_ORBIT_TEMPLATE_CACHE, key, nothing)
+    unlock(_DATA_LOCK)
+    tpl !== nothing && return tpl
+    rapos = Float64[]
+    lvals = Float64[]
+    for r in shells
+        rr = f64(r)
+        for lf in Lfrac
+            push!(rapos, rr)
+            push!(lvals, f64(lf))
+        end
+    end
+    tpl = (rapos, lvals)
+    lock(_DATA_LOCK)
+    _ORBIT_TEMPLATE_CACHE[key] = tpl
+    unlock(_DATA_LOCK)
+    return tpl
+end
+
+function build_A_matrix_from_ctx(ctx::HaloContext, th0, dt, r_centers_m, valid, sini, nsteps)
+    shells        = r_centers_m[valid]
+    Ndat          = length(shells)
+    theta0        = f64(th0[1])
+    theta_hash    = hash((ctx.halo[:rho_s], ctx.halo[:r_s], ctx.halo[:MBH]))
+    rng           = MersenneTwister(UInt(theta_hash))
+    dt_frac_orbit = DEFAULT_DT_FRAC
+    Lfrac         = DEFAULT_LFRAC
+    # Cached orbit launch grid
+    rapos, lvals  = get_orbit_template(shells, Lfrac)
+    Norbit        = length(rapos)
+    A             = zeros(Float64, Ndat, Norbit)
+    edges         = get_radial_edges(r_centers_m)
+    orbit_ctx     = (frc = ctx.frc, R_pos = ctx.R, halo = ctx.halo)
+    col           = 1
+    @inbounds for idx in eachindex(rapos)
+        rapo = rapos[idx]
+        lf   = lvals[idx]
+
+        if !(isfinite(rapo) && rapo > 0.0)
+            col += 1
+            continue
+        end
+        r0_frac = 0.95 + 0.04 * rand(rng)
+        ic, Lz0, E0, vc, st = launch_orbit_apocenter(rapo=rapo, theta0=theta0, Lz_frac=lf, pot=ctx.pot, frc=ctx.frc, r0_frac=r0_frac, dt_frac=dt_frac_orbit)
+        if st != :ok
+            col += 1
+            continue
+        end
+        r, vr, theta, vtheta = integrate_orbit_rk4(ic=ic, xLz=Lz0, orbit_ctx=orbit_ctx, nsteps=nsteps)
+        isempty(r) && (col += 1; continue)
+        dt_orb = f64(ic[3])
+        sig2 = orbit_to_sigma2_profile(r_arr=r, th_arr=theta, vr_arr=vr, xLz=Lz0, dt_orb=dt_orb, sini=sini, r_centers_m=r_centers_m, edges=edges)
+        A[:, col] .= sig2[valid]
+        col += 1
+    end
+
+    return A
+end
+
+build_A_matrix_julia(th0, dt, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type) =
+    build_A_matrix_from_ctx(get_halo_context(rho_s,r_s,MBH,halo_type), th0, dt, r_centers_m, valid, sini, nsteps)
+
+ospm_runcheck(theta, args...) =
+    build_A_matrix_julia(args..., theta[1], theta[2], length(theta)>2 ? theta[3] : 0.0)
+
+# --- Target data for WLS chi^2 (module-global, set once) ---
+const _TARGET_LOCK = ReentrantLock()
+const _TARGET_D  = Ref{Vector{Float64}}(Float64[])
+const _TARGET_W2 = Ref{Vector{Float64}}(Float64[])   # w2 = 1/sigma^2
+function set_target_wls!(d::AbstractVector{<:Real}, sigma::AbstractVector{<:Real})
+    dd = Float64.(d)
+    ss = Float64.(sigma)
+    length(dd) == length(ss) || error("set_target_wls!: d and sigma must match")
+    any(!isfinite, dd) && error("set_target_wls!: non-finite d")
+    any(x->(!(isfinite(x) && x>0.0)), ss) && error("set_target_wls!: sigma must be finite and > 0")
+    w2 = similar(ss)
+    @inbounds for i in eachindex(ss)
+        w2[i] = 1.0 / (ss[i]*ss[i])
+    end
+    lock(_TARGET_LOCK)
+    _TARGET_D[]  = dd
+    _TARGET_W2[] = w2
+    unlock(_TARGET_LOCK)
+    return nothing
+end
+function _get_target_wls()
+    lock(_TARGET_LOCK)
+    d  = _TARGET_D[]
+    w2 = _TARGET_W2[]
+    unlock(_TARGET_LOCK)
+    isempty(d) && error("WLS target not initialized. Call set_target_wls! first.")
+    return d, w2
+end
+# --- Weighted NNLS via projected gradient; minimizes 0.5*Σ w2[i]*((Ax)[i]-d[i])^2 s.t. x≥0 ---
+@inline function _proj_nn!(x::Vector{Float64})
+    @inbounds for i in eachindex(x)
+        x[i] = x[i] < 0.0 ? 0.0 : x[i]
+    end
+    return x
+end
+function _lipschitz_wls(A::Matrix{Float64}, w2::Vector{Float64}; iters::Int=12)
+    m, n = size(A)
+    v  = fill(1.0/sqrt(n), n)
+    Av = zeros(Float64, m)
+    t  = zeros(Float64, m)
+    g  = zeros(Float64, n)
+    for _ in 1:iters
+        mul!(Av, A, v)                          # Av = A*v
+        @inbounds for i in 1:m
+            t[i] = w2[i] * Av[i]                # t = W2*(A*v)
+        end
+        mul!(g, transpose(A), t)                # g = A'*(W2*A*v)
+        ng = norm(g)
+        ng > 0.0 || break
+        @inbounds for j in 1:n
+            v[j] = g[j] / ng
+        end
+    end
+    mul!(Av, A, v)
+    @inbounds for i in 1:m
+        t[i] = w2[i] * Av[i]
+    end
+    mul!(g, transpose(A), t)
+    L = dot(v, g)
+    return max(L, 1e-30)
+end
+function _nnls_wls_pg!(A::Matrix{Float64}, d::Vector{Float64}, w2::Vector{Float64};
+    max_iter::Int=400, tol::Float64=1e-8)
+    m, n = size(A)
+    x    = zeros(Float64, n)
+    xnew = similar(x)
+    g    = similar(x)
+    Ax   = zeros(Float64, m)
+    r    = zeros(Float64, m)
+    t    = zeros(Float64, m)
+    L = _lipschitz_wls(A, w2)
+    α = 1.0 / L
+    for _ in 1:max_iter
+        mul!(Ax, A, x)                          # Ax
+        @inbounds for i in 1:m
+            r[i] = Ax[i] - d[i]                 # r = Ax - d
+            t[i] = w2[i] * r[i]                 # t = W2*r
+        end
+        mul!(g, transpose(A), t)                # g = A'*(W2*(Ax-d))
+        @inbounds for j in 1:n
+            xnew[j] = x[j] - α * g[j]
+        end
+        _proj_nn!(xnew)
+        if norm(xnew .- x) <= tol * max(1.0, norm(x))
+            x .= xnew
+            break
+        end
+        x .= xnew
+    end
+    return x
+end
 end # module
