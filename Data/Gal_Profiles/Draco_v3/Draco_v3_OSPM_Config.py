@@ -62,11 +62,11 @@ CONFIG = {
     },
 
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA": [3, 1800.0, 9e5],
+    "INITIAL_THETA": [3, 1800.0, 5e5],
     "THETA_BOUNDS": [
-        (2.0, 15.0),
-        (1800.0, 8000.0),
-        (5.5e5, 5e6),
+        (0, 100.0),
+        (300.0, 8000.0),
+        (0, 5e6),
     ],
 
     "PEN_SPHERE_STRENGTH": 200,
