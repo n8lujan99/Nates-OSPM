@@ -18,6 +18,11 @@ Data/Gal_Profiles/Draco/Draco_OSPM_Config.py
 # OS files
 .DS_Store
 
+# cockpit
+
+Cockpit/
+
+
 # ===============================
 # HPC / Julia runtime artifacts
 # ===============================

@@ -107,9 +107,9 @@ class Deck:
         m=np.all(np.abs(A-theta)<tol, axis=1)
         if not m.any(): return np.inf
         return np.linalg.norm(A[m]-theta,axis=1).min()
-    def add(self, theta, chi2, reward, pid, status):
+    def add(self, theta, chi2, reward, pid, status, refine_passes=None):
         row_dict = {k: theta[i] for i, k in enumerate(self.params)}
-        row_dict |= dict(chi2=chi2, reward=reward, status=status, proposal_id=pid)
+        row_dict |= dict(chi2=chi2, reward=reward, status=status, proposal_id=pid, refine_passes=refine_passes)
         self._buf.append([row_dict.get(k) for k in self.cols])
         self._pbuf.append([theta[i] for i in range(len(self.params))])
         self._sbuf.append(status)
@@ -161,7 +161,7 @@ class FlatDetector:
         if not np.isfinite(x): return
         self.buf.append(x)
         if len(self.buf)<self.w: self.cnt=0; return
-        self.cnt=self.cnt+1 if np.std(self.buf)<self.eps else 0
+        self.cnt=self.cnt+1 if np.std(self.buf)<self.eps and np.isfinite(x) else 0
     def flat(self): return self.cnt>=self.p
 # ============================================================
 # Runner
@@ -212,7 +212,7 @@ class Runner:
         spread = np.std(X, axis=0)
         span = np.array([hi - lo for lo, hi in self.bounds])
         rel_spread = np.mean(spread / span)
-        return (chi_std < 1.0) and (rel_spread < 0.15)
+        return (chi_std < 1.0) and (rel_spread < 0.15) and ("refine_passes" in good.columns and good["refine_passes"].fillna(0).median() >= self.cfg.get("MAX_REFINE", 0))
     
     def step_scale(self, deck):
         if not self.ai:
@@ -271,7 +271,6 @@ class Runner:
 # ============================================================
 # Daemon
 # ============================================================
-
 def run_daemon(config, physics_engine):
     from collections import defaultdict
 
@@ -295,99 +294,127 @@ def run_daemon(config, physics_engine):
     if use_batch:
         from juliacall import Main
         import juliacall
-        jl_batch   = Main.OSPMPhysicsSpherical.evaluate_batch_theta
-        sini       = float(obs.sini)
-        Norbit     = int(obs.Norbit)
+        jl_batch = Main.OSPMPhysicsSpherical.evaluate_batch_theta
+        sini     = float(obs.sini)
+        Norbit   = int(obs.Norbit)
         print(f"[Daemon] batch mode ON — Norbit={Norbit}, Nstar_vlos={obs.Nstar_vlos}")
     else:
         print("[Daemon] batch mode OFF — falling back to serial corpo.eval")
 
     while runs < config["MAX_RUNS"]:
 
-        # ---- propose ----
         print(f"[Daemon] loop iter runs={runs}", flush=True)
-        t0    = time.perf_counter()
+        t0 = time.perf_counter()
+
         deck._flush_buf()
         base_props = runner.propose(deck)
+
         props = []
         for theta, pid in base_props:
             rho_s, r_s, MBH = theta
             variants = [
-                ("full",        [rho_s, r_s, MBH]),
-                ("no_bh",       [rho_s, r_s, 0.0]),
-                ("no_halo",     [0.0,   r_s, MBH]),
-                ("bh_small",    [rho_s, r_s, 0.1 * MBH]),
-                ("halo_small",  [0.1 * rho_s, r_s, MBH]),
+                ("full", theta),
+
+                # clean isolation
+                ("bh_only",   [0.0,   r_s, MBH]),
+                ("halo_only", [rho_s, r_s, 0.0]),
+
+                # true local perturbations (keep the other component!)
+                ("bh_up",     [rho_s, r_s, MBH * 2.0]),
+                ("bh_down",   [rho_s, r_s, MBH * 0.5]),
+
+                ("halo_up",   [rho_s * 2.0, r_s, MBH]),
+                ("halo_down", [rho_s * 0.5, r_s, MBH]),
             ]
             for label, tvar in variants:
                 props.append((tvar, pid, label))
-                
+
         t_acc["propose"] += time.perf_counter() - t0
         t_cnt["propose"] += 1
 
         print(f"[Daemon] proposing {len(props)} variants, starting eval...", flush=True)
-        # ---- physics eval + immediate record ----
+
         t0 = time.perf_counter()
         CHUNK = 80
 
-        def _record(theta, pid, label, status, chi2):
+        def _record(theta, pid, label, status, chi2, refine_passes):
             nonlocal best, runs
-            reward = fixer.reward(status, chi2)
+            base_reward = fixer.reward(status, chi2)
+
+            if status == "pass":
+                stability = 1.0 - (refine_passes / max(1, config.get("MAX_REFINE", 1)))
+                reward = base_reward + 0.5 * stability
+            else:
+                reward = base_reward
+
             t_add = time.perf_counter()
-            deck.add(theta, chi2, reward, pid, f"{status}_{label}")
+            deck.add(theta, chi2, reward, pid, f"{status}_{label}", refine_passes=refine_passes)
             t_acc["add"] += time.perf_counter() - t_add
             t_cnt["add"] += 1
-            flat.push(chi2)
+
+            flat.push(chi2 if refine_passes >= config.get("MAX_REFINE", 0) else np.inf)
             fixer.unlock(deck, runner)
+
             if chi2 < best:
                 best = chi2
+
             runs += 1
+
             if not runner.fill_triggered:
                 if runner.detect_basin(deck):
                     runner.fill_mode = True
                     runner.fill_triggered = True
                     print(f"[Daemon] Basin detected at run {runs} — switching to fill mode")
+
             if runs % PROF_EVERY == 0:
                 def avg(k):
                     n = t_cnt[k]
                     return (t_acc[k] / n) if n else 0.0
+
                 t_eval    = t_acc["eval"]
                 per_batch = t_eval / max(t_cnt["propose"], 1)
                 per_theta = t_eval / max(t_cnt["eval"], 1)
-                print(f"[PROF] runs={runs} best={best:.4f} " f"propose={avg('propose'):.4f}s " f"eval/batch={per_batch:.4f}s " f"eval/theta={per_theta:.4f}s " f"add={avg('add'):.4f}s", flush=True)
+
+                print(f"[PROF] runs={runs} best={best:.4f} propose={avg('propose'):.4f}s eval/batch={per_batch:.4f}s eval/theta={per_theta:.4f}s add={avg('add'):.4f}s", flush=True)
+
                 t_acc.clear()
                 t_cnt.clear()
+
             if flat.flat():
                 deck.save()
                 print(f"[Daemon] Flat region detected after {runs} runs")
-                return True  # signal stop
+                return True
+
             return False
-        
+
         if use_batch:
             thetas = [theta for theta, pid, label in props]
             stop = False
+
             for i in range(0, len(thetas), CHUNK):
                 chunk_props  = props[i:i+CHUNK]
                 chunk_thetas = thetas[i:i+CHUNK]
                 theta_mat    = np.array(chunk_thetas, dtype=float).T
-                chunk_t0     = time.perf_counter()
+
+                chunk_t0 = time.perf_counter()
+
                 try:
                     NBINS_OCC  = config["OBSERVABLES"]["NBINS_OCC"]
                     LAMBDA_OCC = config["OBSERVABLES"]["LAMBDA_OCC"]
-                    status_code_vec, chi2_vec = jl_batch(
-                        juliacall.convert(Main.Matrix[Main.Float64], theta_mat),
-                        juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m),
-                        juliacall.convert(Main.Vector[Main.Bool], obs.valid_vlos),
-                        juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps),
-                        juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
-                        sini, Norbit, halo_type, Nocc=NBINS_OCC, lambda_occ=LAMBDA_OCC)
+
+                    status_code_vec, chi2_vec, refine_vec = jl_batch(
+                        juliacall.convert(Main.Matrix[Main.Float64], theta_mat), juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m), juliacall.convert(Main.Vector[Main.Bool], obs.valid_vlos),
+                        juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps), juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
+                        sini, Norbit, halo_type, Nocc=NBINS_OCC, lambda_occ=LAMBDA_OCC, max_refine=config.get("MAX_REFINE", 0))
 
                     t_acc["eval"] += time.perf_counter() - chunk_t0
                     t_cnt["eval"] += len(chunk_thetas)
 
                     for j, (theta, pid, label) in enumerate(chunk_props):
+
                         chi2 = float(chi2_vec[j])
                         code = int(status_code_vec[j])
+                        refine_passes = int(refine_vec[j])   # ← FIX
 
                         if code == 0 and np.isfinite(chi2):
                             status = "pass"
@@ -401,28 +428,42 @@ def run_daemon(config, physics_engine):
                         if not np.isfinite(chi2):
                             chi2 = np.inf
 
-                        if _record(theta, pid, label, status, chi2):
+                        if _record(theta, pid, label, status, chi2, refine_passes):  # ← FIX
                             stop = True
                             break
+
                 except Exception as e:
                     t_acc["eval"] += time.perf_counter() - chunk_t0
                     t_cnt["eval"] += len(chunk_thetas)
                     print(f"[Daemon] chunk failed (size={len(chunk_thetas)}): {e}", flush=True)
+
                     for theta, pid, label in chunk_props:
-                        if _record(theta, pid, label, "numeric_fail", np.inf): stop = True; break
-                if stop: break
+                        if _record(theta, pid, label, "numeric_fail", np.inf, 0):  # ← FIX
+                            stop = True
+                            break
+
+                if stop:
+                    break
+
         else:
             for theta, pid, label in props:
                 chunk_t0 = time.perf_counter()
                 status, chi2 = corpo.eval(theta)
+
                 t_acc["eval"] += time.perf_counter() - chunk_t0
                 t_cnt["eval"] += 1
-                if _record(theta, pid, label, status, chi2): stop = True; break
+
+                if _record(theta, pid, label, status, chi2, 0):  # ← FIX
+                    stop = True
+                    break
+
         if stop:
             return
+
         t0 = time.perf_counter()
         deck._flush_buf()
         runner.train(deck)
         t_acc["train"] += time.perf_counter() - t0
         t_cnt["train"] += 1
+
     deck.save()

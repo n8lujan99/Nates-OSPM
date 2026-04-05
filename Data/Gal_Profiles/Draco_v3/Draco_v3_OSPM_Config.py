@@ -62,7 +62,7 @@ CONFIG = {
     },
 
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA": [3, 1800.0, 5e5],
+    "INITIAL_THETA": [1, 1800.0, 5e5],
     "THETA_BOUNDS": [
         (0, 100.0),
         (300.0, 8000.0),
