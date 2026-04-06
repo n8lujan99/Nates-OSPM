@@ -17,7 +17,8 @@ Data/Gal_Profiles/Draco/Draco_OSPM_Config.py
 
 # OS files
 .DS_Store
-
+.gitignore
+julia_env
 # cockpit
 
 Cockpit/
