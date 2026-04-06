@@ -163,6 +163,51 @@ class FlatDetector:
         if len(self.buf)<self.w: self.cnt=0; return
         self.cnt=self.cnt+1 if np.std(self.buf)<self.eps and np.isfinite(x) else 0
     def flat(self): return self.cnt>=self.p
+
+class ConvergenceDetector:
+    """Stop when the top-N posterior is tight and stable.
+
+    Checks every CONVERGE_CHECK_EVERY runs (only after fill_mode is active).
+    Requires CONVERGE_PATIENCE consecutive passing checks to stop — guards
+    against transient tightening early in fill mode.
+
+    Thresholds are intentionally tighter than detect_basin (0.05 vs 0.15)
+    so fill_mode has time to densify before we call it done.
+    """
+    def __init__(self, cfg, bounds, cols):
+        self.rel_thr  = float(cfg.get("CONVERGE_REL_SPREAD",  0.05))
+        self.chi_thr  = float(cfg.get("CONVERGE_CHI_STD",     0.5))
+        self.n_top    = int(cfg.get("CONVERGE_N_TOP",          200))
+        self.n_min    = int(cfg.get("CONVERGE_MIN_PASS",       500))
+        self.patience = int(cfg.get("CONVERGE_PATIENCE",       3))
+        self.every    = int(cfg.get("CONVERGE_CHECK_EVERY",    500))
+        self.bounds   = bounds
+        self.cols     = cols
+        self.cnt      = 0
+
+    def check(self, deck, runner, runs):
+        if not runner.fill_mode:
+            return False
+        if runs % self.every != 0:
+            return False
+        good = deck.df[deck.df.status.str.startswith("pass")]
+        if len(good) < self.n_min:
+            self.cnt = 0
+            return False
+        top        = good.nsmallest(min(len(good), self.n_top), "chi2")
+        chi_std    = top["chi2"].std()
+        spread     = np.std(top[self.cols].values, axis=0)
+        span       = np.array([hi - lo for lo, hi in self.bounds])
+        rel_spread = np.mean(spread / span)
+        if chi_std < self.chi_thr and rel_spread < self.rel_thr:
+            self.cnt += 1
+        else:
+            self.cnt = 0
+        converged = self.cnt >= self.patience
+        if converged:
+            print(f"[Converge] posterior converged at run {runs}: "
+                  f"rel_spread={rel_spread:.4f} chi_std={chi_std:.4f}", flush=True)
+        return converged
 # ============================================================
 # Runner
 # ============================================================
@@ -276,11 +321,12 @@ class Runner:
 def run_daemon(config, physics_engine):
     from collections import defaultdict
 
-    deck   = Deck(config)
-    runner = Runner(config)
-    corpo  = Corpo(physics_engine)
-    fixer  = Fixer(config)
-    flat   = FlatDetector(config.get("FLAT_WINDOW", 200), config.get("FLAT_THRESHOLD", 1e-6), config.get("FLAT_PATIENCE", 3))
+    deck    = Deck(config)
+    runner  = Runner(config)
+    corpo   = Corpo(physics_engine)
+    fixer   = Fixer(config)
+    flat    = FlatDetector(config.get("FLAT_WINDOW", 200), config.get("FLAT_THRESHOLD", 1e-6), config.get("FLAT_PATIENCE", 3))
+    converge = ConvergenceDetector(config, config["THETA_BOUNDS"], config["PARAMETER_NAMES"])
 
     runs = 0
     best = np.inf
@@ -337,7 +383,13 @@ def run_daemon(config, physics_engine):
         print(f"[Daemon] proposing {len(props)} variants, starting eval...", flush=True)
 
         t0 = time.perf_counter()
-        CHUNK = 80
+        _jnt = os.environ.get("JULIA_NUM_THREADS", "1")
+        _nthreads = os.cpu_count() or 1 if _jnt == "auto" else int(_jnt)
+        # Default: one Julia call per daemon iteration so :dynamic has the full
+        # props list to load-balance. A fixed CHUNK < len(props) risks a small
+        # fractional last-chunk that maps 1:1 to threads (e.g. 560 props /
+        # CHUNK=240 → last chunk=80=nthreads, defeating the fix).
+        CHUNK = int(config.get("CHUNK_SIZE", max(3 * _nthreads, len(props))))
 
         def _record(theta, pid, label, status, chi2, refine_passes):
             nonlocal best, runs
@@ -387,6 +439,10 @@ def run_daemon(config, physics_engine):
                 print(f"[Daemon] Flat region detected after {runs} runs")
                 return True
 
+            if converge.check(deck, runner, runs):
+                deck.save()
+                return True
+
             return False
 
         if use_batch:
@@ -407,7 +463,8 @@ def run_daemon(config, physics_engine):
                     status_code_vec, chi2_vec, refine_vec = jl_batch(
                         juliacall.convert(Main.Matrix[Main.Float64], theta_mat), juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m), juliacall.convert(Main.Vector[Main.Bool], obs.valid_vlos),
                         juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps), juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
-                        sini, Norbit, halo_type, Nocc=NBINS_OCC, lambda_occ=LAMBDA_OCC, max_refine=config.get("MAX_REFINE", 0))
+                        sini, Norbit, halo_type, Nocc=NBINS_OCC, lambda_occ=LAMBDA_OCC, max_refine=config.get("MAX_REFINE", 0),
+                        timeout_s=float(config.get("EVAL_TIMEOUT_S", 120.0)))
 
                     t_acc["eval"] += time.perf_counter() - chunk_t0
                     t_cnt["eval"] += len(chunk_thetas)
@@ -424,6 +481,8 @@ def run_daemon(config, physics_engine):
                             status = "orbit_fail"
                         elif code == 2:
                             status = "numeric_fail"
+                        elif code == 4:
+                            status = "timeout"
                         else:
                             status = "unknown_fail"
 

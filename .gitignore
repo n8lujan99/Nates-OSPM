@@ -16,6 +16,7 @@ Data/Gal_Profiles/Draco/Draco_OSPM_Config.py
 *Zone.Identifier
 
 # OS files
+which_galaxy
 .DS_Store
 .gitignore
 julia_env

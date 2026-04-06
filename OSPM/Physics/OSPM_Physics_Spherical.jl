@@ -20,7 +20,7 @@ export build_R_halo_physical, rho_interp, halo_from_theta, tables_spherical, mak
 include("OSPM_Physics_Support.jl")
 
 # Main A-matrix builder: maps orbital weights → observables (vlos likelihoods + occupancy). Parallel, numerically hardened.
-function build_A_matrix_hybrid(Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC, dt_frac_orbit::Float64=DEFAULT_DT_FRAC, dR_frac::Float64=DEFAULT_DR_FRAC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS, diag::Bool=false, threaded::Bool=true, fill_pct::Float64=0.95)
+function build_A_matrix_hybrid(Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC, dt_frac_orbit::Float64=DEFAULT_DT_FRAC, dR_frac::Float64=DEFAULT_DR_FRAC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS, diag::Bool=false, threaded::Bool=true, fill_pct::Float64=0.95, t_deadline::UInt64=typemax(UInt64))
 
     Nstar = length(R_star_m)
     R_sorted = sort(R_star_m)
@@ -67,9 +67,15 @@ function build_A_matrix_hybrid(Norbit::Int, R_star_m::Vector{Float64}, has_vlos:
         _orbit_cost[c] = lf * rapo      # low = expensive (radial + deep)
     end
     cost_order = sortperm(_orbit_cost)
-    next_orbit = Threads.Atomic{Int}(1)
+    # Budget = max_attempts_factor passes over the Norbit slots.
+    # next_orbit runs 1 … max_attempts_factor*Norbit; each worker derives
+    # which pass it is on (attempt) and which column to fill (c_claim) from
+    # the flat index, so retries stay in the same atomic work-stealing queue
+    # and all threads remain saturated without a barrier between passes.
+    next_orbit    = Threads.Atomic{Int}(1)
     filled_atomic = Threads.Atomic{Int}(0)
-    fill_target = round(Int, max(fill_pct, 0.99) * Norbit)
+    fill_target   = round(Int, max(fill_pct, 0.99) * Norbit)
+    orbit_budget  = max_attempts_factor * Norbit
 
     function _worker!(rng)
         col_occ  = zeros(Float64, Nbins_occ)
@@ -78,16 +84,21 @@ function build_A_matrix_hybrid(Norbit::Int, R_star_m::Vector{Float64}, has_vlos:
         vlos_buf = Vector{Float64}(undef, nsteps)
 
         while true
+            time_ns() > t_deadline && break
             filled_atomic[] >= fill_target && break
             c_seq = Threads.atomic_add!(next_orbit, 1)
-            c_seq > Norbit && break
-            c_claim = cost_order[c_seq]
+            c_seq > orbit_budget && break
+            attempt = (c_seq - 1) ÷ Norbit          # 0 on first pass, 1 on second, …
+            c_claim = cost_order[mod1(c_seq, Norbit)]
+            # On retry passes skip slots that already succeeded
+            attempt > 0 && success_flags[c_claim] && continue
             idx_local = mod1(c_claim, Nshells)
             rapo = f64(shells[idx_local])
             rapo_list[c_claim] = rapo
             !(isfinite(rapo) && rapo > 0.0) && continue
             lf      = Lfrac[1 + ((c_claim - 1) % length(Lfrac))]
-            r0_frac = 0.95 + 0.04 * rand(rng)
+            # Vary r0_frac per attempt so retries sample different launch points
+            r0_frac = 0.95 - 0.05 * f64(attempt) / max_attempts_factor + 0.04 * rand(rng)
             ic, Lz0, E0, vc, st = launch_orbit_apocenter(rapo=rapo, theta0=theta0, Lz_frac=f64(lf), pot=ctx.pot, frc=ctx.frc, r0_frac=r0_frac, dt_frac=dt_frac_orbit)
             st != :ok && continue
             r, vr, theta, vtheta = integrate_orbit_rk4(ic=ic, xLz=Lz0, orbit_ctx=orbit_ctx, nsteps=nsteps)
@@ -220,8 +231,8 @@ function build_A_matrix_hybrid(Norbit::Int, R_star_m::Vector{Float64}, has_vlos:
     return diag ? (A, Dict("filled" => filled, "attempts" => Norbit)) : A
 end
 
-# Batch evaluator (@threads): build A + solve weights + chi2_red per theta. status: 0=pass 1=A_fail 2=weights_fail 3=exception
-function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{Float64}, valid_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, Norbit::Int, halo_type::String; Nocc::Int=0, lambda_occ::Float64=0.0, alpha::Float64=DEFAULT_ALPHA, maxiter::Int=DEFAULT_MAXITER, max_refine::Int=0)
+# Batch evaluator (@threads): build A + solve weights + chi2_red per theta. status: 0=pass 1=A_fail 2=weights_fail 3=exception 4=timeout
+function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{Float64}, valid_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, Norbit::Int, halo_type::String; Nocc::Int=0, lambda_occ::Float64=0.0, alpha::Float64=DEFAULT_ALPHA, maxiter::Int=DEFAULT_MAXITER, max_refine::Int=0, timeout_s::Float64=120.0)
 
     nrow, nbatch = size(thetas)
     R_valid  = R_star_m[valid_vlos]
@@ -233,13 +244,19 @@ function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{F
     status = Vector{Int}(undef, nbatch)
     refine_used = zeros(Int, nbatch)
     chi2   = Vector{Float64}(undef, nbatch)
+    t_deadline = time_ns() + UInt64(round(timeout_s * 1e9))
     Threads.@threads :dynamic for i in 1:nbatch
+        if time_ns() > t_deadline
+            status[i] = 4
+            chi2[i]   = Inf
+            continue
+        end
         try
             rho_s = Float64(thetas[1, i])
             r_s   = Float64(thetas[2, i])
             MBH   = nrow >= 3 ? Float64(thetas[3, i]) : 0.0
             # --- build full hybrid matrix (velocity + light) ---
-            A = build_A_matrix_hybrid(Norbit, R_star_m, valid_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, halo_type; return_occ=true, Nbins_occ=Nocc, threaded=false)
+            A = build_A_matrix_hybrid(Norbit, R_star_m, valid_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, halo_type; return_occ=true, Nbins_occ=Nocc, threaded=false, t_deadline=t_deadline)
             m, n = size(A)
             if m == 0 || n == 0 || !all(isfinite, A)
                 status[i] = 1
@@ -275,7 +292,8 @@ function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{F
                 passes_done = 0
                 for pass in 1:max_refine
                     passes_done = pass
-                    A_r = build_A_matrix_hybrid(Norbit, R_star_m, valid_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, halo_type; return_occ=true, Nbins_occ=Nocc, threaded=false)
+                    time_ns() > t_deadline && break
+                    A_r = build_A_matrix_hybrid(Norbit, R_star_m, valid_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, halo_type; return_occ=true, Nbins_occ=Nocc, threaded=false, t_deadline=t_deadline)
                     m_r, n_r = size(A_r)
                     (m_r == 0 || n_r == 0 || !all(isfinite, A_r)) && break
 
