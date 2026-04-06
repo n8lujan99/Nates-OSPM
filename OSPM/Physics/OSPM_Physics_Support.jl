@@ -75,6 +75,87 @@ const _HALO_LOCK = ReentrantLock()
 # ============================================================
 # §3  SMALL UTILITIES
 # ============================================================
+function build_occ_edges_adaptive(R_star_m::Vector{Float64}, vlos_idx::Vector{Int};
+    zone_quantiles::Tuple{Float64,Float64} = (0.25, 0.60),
+    base_bins::NTuple{3,Int} = (3, 2, 1),          # inner, mid, outer
+    max_extra::NTuple{3,Int} = (2, 1, 1),
+    min_stars_per_bin::Int = 3,
+    res_factor::Float64 = 2.0)
+
+    # use only the stars that actually speak in the velocity block
+    R_use = isempty(vlos_idx) ? copy(R_star_m) : R_star_m[vlos_idx]
+    R_use = sort(R_use[isfinite.(R_use)])
+
+    n = length(R_use)
+    if n == 0
+        return [0.0, 1.0]
+    elseif n == 1
+        r0 = R_use[1]
+        return [max(0.0, 0.9r0), 1.1r0]
+    end
+
+    Rmin = R_use[1]
+    Rmax = R_use[end]
+    Rmax <= Rmin && return [Rmin, Rmax + max(abs(Rmax), 1.0)]
+
+    q_in, q_mid = zone_quantiles
+    Ra = quantile(R_use, q_in)
+    Rb = quantile(R_use, q_mid)
+
+    # keep the zones ordered and non-degenerate
+    ΔR_med = median(diff(R_use))
+    floor_sep = max(1e-12, 0.5 * ΔR_med)
+
+    Ra = clamp(Ra, Rmin + floor_sep, Rmax - 2floor_sep)
+    Rb = clamp(Rb, Ra   + floor_sep, Rmax - floor_sep)
+
+    function zone_refine(Rz::Vector{Float64}, zlo::Float64, zhi::Float64, base::Int, extra_max::Int)
+        nz = length(Rz)
+        if nz < 2 || !(zhi > zlo)
+            return max(base, 1)
+        end
+
+        dz = diff(sort(Rz))
+        dz = dz[isfinite.(dz) .& (dz .> 0.0)]
+        dmed = isempty(dz) ? (zhi - zlo) : median(dz)
+        zwidth = zhi - zlo
+
+        # count-based refinement
+        n_by_count = fld(nz, min_stars_per_bin)
+
+        # resolution-based refinement
+        n_by_res = floor(Int, zwidth / max(res_factor * dmed, 1e-12))
+
+        n_target = min(n_by_count, n_by_res)
+        n_bins = base + clamp(n_target - base, 0, extra_max)
+        return max(n_bins, 1)
+    end
+
+    Rin  = R_use[R_use .<  Ra]
+    Rmid = R_use[(R_use .>= Ra) .& (R_use .<  Rb)]
+    Rout = R_use[R_use .>= Rb]
+
+    Nin  = zone_refine(Rin,  Rmin, Ra,  base_bins[1], max_extra[1])
+    Nmid = zone_refine(Rmid, Ra,   Rb,  base_bins[2], max_extra[2])
+    Nout = zone_refine(Rout, Rb,   Rmax, base_bins[3], max_extra[3])
+
+    # do not let the outer cloud dominate the occupancy language
+    Nout = min(Nout, max(1, Nmid))
+
+    ein  = collect(range(Rmin, Ra;   length=Nin  + 1))
+    emid = collect(range(Ra,   Rb;   length=Nmid + 1))
+    eout = collect(range(Rb,   Rmax; length=Nout + 1))
+
+    occ_edges = vcat(ein, emid[2:end], eout[2:end])
+
+    # final monotonic cleanup
+    occ_edges = sort(unique(occ_edges))
+    if length(occ_edges) < 2
+        occ_edges = [Rmin, Rmax]
+    end
+    return occ_edges
+end
+
 @inline function normalize_halo(halo)
     h=Dict{Symbol,Any}()
     for (k,v) in halo
