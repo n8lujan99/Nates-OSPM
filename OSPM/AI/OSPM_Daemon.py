@@ -186,6 +186,7 @@ class Runner:
         self.scaled=False
         self.fill_mode = False
         self.fill_triggered = False
+        self.explore_frac = float(cfg.get("EXPLORE_FRACTION", 0.0))
         
     def enable_ai(self):
         self.model=Model(self.dim)
@@ -199,8 +200,9 @@ class Runner:
     def _base(self,deck):
         good=deck.df[deck.df.status.str.startswith("pass")]
         if len(good)>=10:
+            if np.random.rand() < 0.15:
+                return good[self.cols].sample(1).values[0]
             return good.nsmallest(min(len(good),500),"chi2")[self.cols].sample(1).values[0]
-        
         return deck.df[self.cols].dropna().sample(1).values[0]
     def detect_basin(self, deck):
         good = deck.df[deck.df.status.str.startswith("pass")]
@@ -231,7 +233,7 @@ class Runner:
     def propose(self,deck):
         out=[]
         while len(out)<self.batch:
-            if self.ai:
+            if self.ai and not (self.explore_frac > 0 and np.random.rand() < self.explore_frac):
                 if self.fill_mode:
                     good = deck.df[deck.df.status.str.startswith("pass")]
                     base = good.nsmallest(100,"chi2")[self.cols].sample(1).values[0]

@@ -111,7 +111,8 @@ CONFIG = {
     # =========================================================
     # AI / learning
     # =========================================================
-    "AI_START_AFTER":        300,
+    "AI_START_AFTER":        600,
+    "EXPLORE_FRACTION":      0.25,
     "MIN_TRAIN_POINTS":      300,
     "TRAIN_WINDOW":          500,
     "AI_NOISE_INIT":         0.30,
