@@ -6,10 +6,7 @@
 # Dead code (not on the evaluate_batch_theta hot path) is
 # collected at the bottom and clearly labelled.
 # ============================================================
-
-# ============================================================
 # §1  CONSTANTS
-# ============================================================
 const NTHREADS = Threads.nthreads()
 const G    = 6.67430e-11
 const c    = 2.99792458e8
@@ -25,10 +22,7 @@ const EPS_SIN = 1e-6
 const REL_FORCE    = 1e-10   # loosen to 1e-9 if needed
 const BRACKET_FRAC = 1e-6    # MUST be >> eps(Float64)
 
-# ============================================================
-# TUNABLE KNOBS — adjust these to control resolution, accuracy,
-#                 and parallelism.  Everything in one place.
-# ============================================================
+# TUNABLE KNOBS — adjust these to control resolution, accuracy, and parallelism.
 # -- Halo potential grid --
 const DEFAULT_NR              = 256       # radial grid points for potential table
 const DEFAULT_RMAX_FACTOR     = 300.0     # max radius in units of r_s
@@ -50,7 +44,6 @@ const DEFAULT_ALPHA           = 1e-2      # L2 regularization strength
 const DEFAULT_MAXITER         = 150       # LBFGS iteration cap
 const DEFAULT_LOG_EPS         = 1e-300    # log-likelihood floor to avoid log(0)
 const DEFAULT_SIGMA_FLOOR_MPS = 2e3       # velocity-error floor [m/s]
-# ============================================================
 
 # ============================================================
 # §2  TYPES, CACHES, INLINE HELPERS
@@ -114,18 +107,14 @@ function build_occ_edges_adaptive(R_star_m::Vector{Float64}, vlos_idx::Vector{In
         if nz < 2 || !(zhi > zlo)
             return max(base, 1)
         end
-
         dz = diff(sort(Rz))
         dz = dz[isfinite.(dz) .& (dz .> 0.0)]
         dmed = isempty(dz) ? (zhi - zlo) : median(dz)
         zwidth = zhi - zlo
-
         # count-based refinement
         n_by_count = fld(nz, min_stars_per_bin)
-
         # resolution-based refinement
         n_by_res = floor(Int, zwidth / max(res_factor * dmed, 1e-12))
-
         n_target = min(n_by_count, n_by_res)
         n_bins = base + clamp(n_target - base, 0, extra_max)
         return max(n_bins, 1)
@@ -134,20 +123,15 @@ function build_occ_edges_adaptive(R_star_m::Vector{Float64}, vlos_idx::Vector{In
     Rin  = R_use[R_use .<  Ra]
     Rmid = R_use[(R_use .>= Ra) .& (R_use .<  Rb)]
     Rout = R_use[R_use .>= Rb]
-
     Nin  = zone_refine(Rin,  Rmin, Ra,  base_bins[1], max_extra[1])
     Nmid = zone_refine(Rmid, Ra,   Rb,  base_bins[2], max_extra[2])
     Nout = zone_refine(Rout, Rb,   Rmax, base_bins[3], max_extra[3])
-
     # do not let the outer cloud dominate the occupancy language
     Nout = min(Nout, max(1, Nmid))
-
     ein  = collect(range(Rmin, Ra;   length=Nin  + 1))
     emid = collect(range(Ra,   Rb;   length=Nmid + 1))
     eout = collect(range(Rb,   Rmax; length=Nout + 1))
-
     occ_edges = vcat(ein, emid[2:end], eout[2:end])
-
     # final monotonic cleanup
     occ_edges = sort(unique(occ_edges))
     if length(occ_edges) < 2
@@ -434,15 +418,12 @@ function solve_weights_stellar_jl(A::Matrix{Float64}, verr::Vector{Float64}; rv_
     w0  = rand(rng, Norbit) .+ 1e-3
     w0 ./= sum(w0)
     mask = rv_mask !== nothing ? rv_mask : trues(Nstar)
-
     function obj(w::Vector{Float64})
         ll = stellar_log_likelihood_jl(A, w, verr; rv_mask=mask, lambda_occ=lambda_occ, Nocc=Nocc, eps=eps, sigma_floor_mps=sigma_floor_mps)
         return -ll + alpha_eff * dot(w, w)
     end
-
     lo = zeros(Float64, Norbit)
     hi = fill(Inf,      Norbit)
-
     local result
     try
         result = Optim.optimize(obj, lo, hi, w0, Optim.Fminbox(Optim.LBFGS()),
@@ -450,11 +431,9 @@ function solve_weights_stellar_jl(A::Matrix{Float64}, verr::Vector{Float64}; rv_
     catch
         return (zeros(Float64, Norbit), false)
     end
-
     w = max.(Optim.minimizer(result), 0.0)
     s = sum(w)
     (!isfinite(s) || s <= 0.0) && return (zeros(Float64, Norbit), false)
-
     return (w ./ s, true)
 end
 
@@ -508,9 +487,7 @@ end
 
 function update_shell_state!(st::ShellRefinementState, Ak_new::AbstractMatrix, chi2_new::Real, support_new::Real; wchi::Float64=1.0, wsupport::Float64=1.0, wreff::Float64=1.0, tau::Float64=1e-3, patience::Int=3, atol::Float64=1e-12)
     reff_new = effective_rank(Ak_new; atol=atol)
-
     score = shell_score(st.chi2, chi2_new, st.support, support_new, st.reff, reff_new; wchi=wchi, wsupport=wsupport, wreff=wreff)
-
     push!(st.score_history, score)
     st.chi2 = float(chi2_new)
     st.support = float(support_new)

@@ -63,7 +63,7 @@ function _init_orbit_work(
         _orbit_cost[c] = lf * rapo
     end
     cost_order   = sortperm(_orbit_cost)
-    fill_target  = round(Int, max(fill_pct, 0.99) * Norbit)
+    fill_target = max(1, round(Int, clamp(fill_pct, 0.0, 1.0) * Norbit))
     orbit_budget = max_attempts_factor * Norbit
     Ra_match     = quantile(R_sorted, 0.25)
     Rb_match     = quantile(R_sorted, 0.60)
@@ -155,9 +155,10 @@ function _orbit_worker!(st::OrbitWorkState, rng)
                     continue
                 end
                 dR_local = local_spacing(st.R_sorted, Ri)
-                dR = Ri < st.Ra_match ? max(0.35 * dR_local, 0.15 * st.ΔR_med) :
-                     Ri < st.Rb_match ? max(0.45 * dR_local, 0.15 * st.ΔR_med) :
-                                        max(0.60 * dR_local, 0.15 * st.ΔR_med)
+                dR_floor = 0.35 * st.ΔR_med
+                dR = Ri < st.Ra_match ? max(0.60 * dR_local, dR_floor) :
+                    Ri < st.Rb_match ? max(0.80 * dR_local, dR_floor) :
+                                        max(1.00 * dR_local, dR_floor)
                 lo = Ri - dR
                 hi = Ri + dR
                 j0 = searchsortedfirst(s_sorted, lo)
@@ -186,7 +187,7 @@ function _orbit_worker!(st::OrbitWorkState, rng)
 end
 
 # Main A-matrix builder: maps orbital weights → observables (vlos likelihoods + occupancy). Parallel, numerically hardened.
-function build_A_matrix_hybrid(Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC, dt_frac_orbit::Float64=DEFAULT_DT_FRAC, dR_frac::Float64=DEFAULT_DR_FRAC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS, diag::Bool=false, threaded::Bool=true, fill_pct::Float64=0.95, t_deadline::UInt64=typemax(UInt64))
+function build_A_matrix_hybrid(Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC, dt_frac_orbit::Float64=DEFAULT_DT_FRAC, dR_frac::Float64=DEFAULT_DR_FRAC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS, diag::Bool=false, threaded::Bool=true, fill_pct::Float64=0.80, t_deadline::UInt64=typemax(UInt64))
 
     Nstar = length(R_star_m)
     @assert length(has_vlos)      == Nstar
@@ -281,13 +282,15 @@ function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{F
     Nvalid   = length(ve_valid)
     nu       = max(count(valid_vlos) - 3, 1)
     rv_mask  = convert(Vector{Bool}, trues(Nvalid))
-    status      = Vector{Int}(undef, nbatch)
+
+    status      = fill(4, nbatch)      # default = timeout/unprocessed
     refine_used = zeros(Int, nbatch)
-    chi2        = Vector{Float64}(undef, nbatch)
-    t_deadline  = time_ns() + UInt64(round(timeout_s * 1e9))
+    chi2        = fill(Inf, nbatch)
+
     # Shared orbit state per theta — visible to all threads for helping
     work_states = Vector{Union{Nothing, OrbitWorkState}}(undef, nbatch)
     fill!(work_states, nothing)
+
     next_theta = Threads.Atomic{Int}(1)
     nthreads = Threads.nthreads()
     helper_rngs = [MersenneTwister(0x0E100000 + UInt(t) + UInt(nbatch)) for t in 1:nthreads]
@@ -295,14 +298,20 @@ function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{F
     function _batch_worker!(tid::Int)
         rng_own  = MersenneTwister(0x5eed1234 + UInt(tid))
         rng_help = helper_rngs[tid]
+
         while true
-            time_ns() > t_deadline && break
             # ---- Phase 1: claim a theta ----
             i = Threads.atomic_add!(next_theta, 1)
+
             if i <= nbatch
-                if time_ns() > t_deadline
-                    status[i] = 4; chi2[i] = Inf; continue
+                theta_deadline = time_ns() + UInt64(round(timeout_s * 1e9))
+
+                if time_ns() > theta_deadline
+                    status[i] = 4
+                    chi2[i] = Inf
+                    continue
                 end
+
                 try
                     rho_s = Float64(thetas[1, i])
                     r_s   = Float64(thetas[2, i])
@@ -311,46 +320,60 @@ function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{F
                     Rmin_v = minimum(R_star_m)
                     Rmax_v = maximum(R_star_m)
                     if !(isfinite(Rmin_v) && isfinite(Rmax_v) && Rmax_v > Rmin_v) || length(R_star_m) == 0
-                        status[i] = 1; chi2[i] = Inf; continue
+                        status[i] = 1
+                        chi2[i] = Inf
+                        continue
                     end
+
                     ctx = get_halo_context(rho_s, r_s, MBH, halo_type)
                     ws = _init_orbit_work(
                         Norbit, R_star_m, valid_vlos, v_star_mps, verr_star_mps,
                         sini, ctx; nsteps=DEFAULT_NSTEPS, Lfrac=DEFAULT_LFRAC,
                         dt_frac_orbit=DEFAULT_DT_FRAC, Nbins_occ=Nocc,
                         return_occ=true, max_attempts_factor=DEFAULT_MAX_ATTEMPTS,
-                        fill_pct=0.95, t_deadline=t_deadline
+                        fill_pct=0.80, t_deadline=theta_deadline
                     )
                     work_states[i] = ws  # publish and mark joinable
+
                     Threads.atomic_xchg!(ws.phase, 1)
                     _orbit_worker!(ws, rng_own)  # owner does bulk of orbit work
                     Threads.atomic_xchg!(ws.phase, 2)  # close orbit phase
+
                     # Assemble A-matrix
                     A = ws.return_occ ? vcat(ws.A_vlos, ws.A_occ) : ws.A_vlos
                     m, n = size(A)
                     if m == 0 || n == 0 || !all(isfinite, A)
-                        status[i] = 1; chi2[i] = Inf
-                        Threads.atomic_xchg!(ws.phase, 3); continue
+                        status[i] = 1
+                        chi2[i] = Inf
+                        Threads.atomic_xchg!(ws.phase, 3)
+                        continue
                     end
+
                     # Solve weights
                     Nocc_eff = max(size(A, 1) - length(ve_valid), 0)
                     w, ok = solve_weights_stellar_jl(A, ve_valid;
                         rv_mask=rv_mask, Nocc=Nocc_eff, lambda_occ=lambda_occ,
                         alpha=alpha, maxiter=maxiter, seed=UInt(i))
+
                     if !ok
-                        status[i] = 2; chi2[i] = Inf
-                        Threads.atomic_xchg!(ws.phase, 3); continue
+                        status[i] = 2
+                        chi2[i] = Inf
+                        Threads.atomic_xchg!(ws.phase, 3)
+                        continue
                     end
+
                     # Likelihood
                     ll = stellar_log_likelihood_jl(A, w, ve_valid;
                         rv_mask=rv_mask, lambda_occ=lambda_occ, Nocc=Nocc_eff)
                     val = -2.0 * ll / nu
+
                     # Shell refinement (optional, off by default)
                     if max_refine > 0 && isfinite(val)
                         shells_sorted = sort(R_star_m)
                         Ns = length(shells_sorted)
                         shell_states = Vector{ShellRefinementState}(undef, Ns)
                         n_cols = size(A, 2)
+
                         for k in 1:Ns
                             cols_k = collect(k:Ns:min(Norbit, n_cols))
                             Ak = isempty(cols_k) ? zeros(Float64, size(A,1), 1) : Matrix(A[:, cols_k])
@@ -358,22 +381,31 @@ function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{F
                             reff_k = effective_rank(Ak)
                             shell_states[k] = ShellRefinementState(val, support_k, reff_k, Float64[], :active)
                         end
+
                         passes_done = 0
                         for pass_i in 1:max_refine
                             passes_done = pass_i
-                            time_ns() > t_deadline && break
-                            A_r = build_A_matrix_hybrid(Norbit, R_star_m, valid_vlos,
-                                v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, halo_type;
-                                return_occ=true, Nbins_occ=Nocc, threaded=false, t_deadline=t_deadline)
+                            time_ns() > theta_deadline && break
+
+                            A_r = build_A_matrix_hybrid(
+                                Norbit, R_star_m, valid_vlos, v_star_mps, verr_star_mps,
+                                sini, rho_s, r_s, MBH, halo_type;
+                                return_occ=true, Nbins_occ=Nocc, threaded=false,
+                                fill_pct=0.80, t_deadline=theta_deadline
+                            )
                             m_r, n_r = size(A_r)
                             (m_r == 0 || n_r == 0 || !all(isfinite, A_r)) && break
+
+                            Nocc_eff_r = max(size(A_r, 1) - length(ve_valid), 0)
                             w_r, ok_r = solve_weights_stellar_jl(A_r, ve_valid;
-                                rv_mask=rv_mask, Nocc=Nocc, lambda_occ=lambda_occ,
+                                rv_mask=rv_mask, Nocc=Nocc_eff_r, lambda_occ=lambda_occ,
                                 alpha=alpha, maxiter=maxiter, seed=UInt(i + pass_i * nbatch))
                             ok_r || break
+
                             ll_r = stellar_log_likelihood_jl(A_r, w_r, ve_valid;
-                                rv_mask=rv_mask, lambda_occ=lambda_occ, Nocc=Nocc)
+                                rv_mask=rv_mask, lambda_occ=lambda_occ, Nocc=Nocc_eff_r)
                             val_r = -2.0 * ll_r / nu
+
                             any_active = false
                             for k in 1:Ns
                                 shell_states[k].status == :frozen && continue
@@ -384,43 +416,56 @@ function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{F
                                 update_shell_state!(shell_states[k], Ak, val_r, support_k)
                                 shell_states[k].status == :active && (any_active = true)
                             end
+
                             isfinite(val_r) && val_r < val && (val = val_r)
                             any_active || break
                         end
+
                         refine_used[i] = passes_done
                     end
+
                     if isfinite(val)
-                        status[i] = 0; chi2[i] = val
+                        status[i] = 0
+                        chi2[i] = val
                     else
-                        status[i] = 2; chi2[i] = Inf
+                        status[i] = 2
+                        chi2[i] = Inf
                     end
+
                     Threads.atomic_xchg!(ws.phase, 3)
+
                 catch e
-                    status[i] = 3; chi2[i] = Inf
+                    status[i] = 3
+                    chi2[i] = Inf
                     ws_i = work_states[i]
                     ws_i !== nothing && Threads.atomic_xchg!(ws_i.phase, 3)
                     @warn "evaluate_batch_theta exception on i=$i" exception=(e, catch_backtrace())
                 end
+
                 continue  # try to claim another theta
             end
+
             # ---- Phase 2: no unclaimed thetas — help stragglers ----
             helped = false
             for scan in 1:nbatch
-                time_ns() > t_deadline && break
                 ws_scan = work_states[scan]
                 ws_scan === nothing && continue
                 ws_scan.phase[] != 1 && continue
-                # Still in orbit phase — join its work loop
+                time_ns() > ws_scan.t_deadline && continue
                 _orbit_worker!(ws_scan, rng_help)
                 helped = true
                 break  # re-scan (a different theta may now be the bottleneck)
             end
+
             helped || break  # nothing left to help — this thread is done
         end
     end
+
     Threads.@threads :static for t in 1:nthreads
         _batch_worker!(t)
     end
+
     return status, chi2, refine_used
 end
+
 end # module

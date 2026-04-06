@@ -1,45 +1,76 @@
 # OSPM_Daemon.py
 # STAYS IN PYTHON FOREVER
 # Parallelism lives in Julia, not here
+
 import os, time, sys
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 from collections import deque
+
 torch.backends.cudnn.benchmark = False
+
 try:
     from sklearn.preprocessing import StandardScaler
 except Exception:
     StandardScaler = None
+
+
 # ============================================================
 # Small utilities
 # ============================================================
-def clamp(x, lo, hi): return max(lo, min(hi, x))
-def random_theta(bounds): return [np.random.uniform(lo, hi) for lo, hi in bounds]
+def clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
+def random_theta(bounds):
+    return [np.random.uniform(lo, hi) for lo, hi in bounds]
+
 def min_dist(theta, arr):
-    if len(arr)==0: return np.inf
-    return np.linalg.norm(np.asarray(arr)-np.asarray(theta), axis=1).min()
+    if len(arr) == 0:
+        return np.inf
+    return np.linalg.norm(np.asarray(arr) - np.asarray(theta), axis=1).min()
+
 class IdentityScaler:
-    def fit(self, X): return self
-    def transform(self, X): return X
+    def fit(self, X):
+        return self
+    def transform(self, X):
+        return X
+
+
 # ============================================================
 # Models
 # ============================================================
 class Model(nn.Module):
     def __init__(self, dim, width=64):
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(dim, width), nn.ReLU(), nn.Linear(width, width), nn.ReLU(), nn.Linear(width, 1))
-    def forward(self, x): return self.net(x)
+        self.net = nn.Sequential(
+            nn.Linear(dim, width), nn.ReLU(),
+            nn.Linear(width, width), nn.ReLU(),
+            nn.Linear(width, 1)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
 class Agent(nn.Module):
     def __init__(self, dim, hidden=128):
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(dim, hidden), nn.ReLU(), nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, dim), nn.Tanh())
-    def forward(self, x): return self.net(x)
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden), nn.ReLU(),
+            nn.Linear(hidden, hidden), nn.ReLU(),
+            nn.Linear(hidden, dim), nn.Tanh()
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
     @torch.no_grad()
     def act(self, x, noise):
-        a = self.forward(x) + noise*torch.randn_like(x)
+        a = self.forward(x) + noise * torch.randn_like(x)
         return torch.clamp(a, -1.0, 1.0)
+
+
 # ============================================================
 # Deck
 # ============================================================
@@ -55,25 +86,30 @@ class Deck:
         self._pbuf  = []
         self._sbuf  = []
         self._load()
+
     def _load(self):
         dir_name = os.path.dirname(self.path)
         if dir_name:
             os.makedirs(dir_name, exist_ok=True)
+
         if os.path.exists(self.path):
             df = pd.read_csv(self.path)
         else:
-            row = {k:np.nan for k in self.cols}
-            for i,k in enumerate(self.params):
+            row = {k: np.nan for k in self.cols}
+            for i, k in enumerate(self.params):
                 row[k] = self.config["INITIAL_THETA"][i]
-            row["status"]="todo"
+            row["status"] = "todo"
             df = pd.DataFrame([row])
-            df.to_csv(self.path,index=False)
-        missing=[c for c in self.cols if c not in df.columns]
+            df.to_csv(self.path, index=False)
+
+        missing = [c for c in self.cols if c not in df.columns]
         if missing:
             raise KeyError(f"Deck missing required columns: {missing}")
+
         self.df = df[self.cols].copy()
         self._params_arr = self.df[self.params].values.astype(float)
         self._status_arr = self.df["status"].values.astype(str)
+
     def _flush_buf(self):
         if not self._buf:
             return
@@ -84,52 +120,71 @@ class Deck:
         self._buf.clear()
         self._pbuf.clear()
         self._sbuf.clear()
+
     def save(self):
         self._flush_buf()
-        self.df.to_csv(self.path,index=False)
+        self.df.to_csv(self.path, index=False)
         print(f"[Deck] saved {len(self.df)} rows → {self.path}", flush=True)
+
     def _all_params(self):
         if self._pbuf:
             return np.vstack([self._params_arr, np.array(self._pbuf)])
         return self._params_arr
+
     def _all_status(self):
         if self._sbuf:
             return np.concatenate([self._status_arr, np.array(self._sbuf)])
         return self._status_arr
+
     def is_forbidden(self, theta, ndp=12):
         A = np.round(self._all_params(), ndp)
         t = np.round(theta, ndp)
-        m = (A==t).all(axis=1)
-        if not m.any(): return False
-        return (self._all_status()[m]=="forbidden").any()
+        m = (A == t).all(axis=1)
+        if not m.any():
+            return False
+        return (self._all_status()[m] == "forbidden").any()
+
     def nearest_distance(self, theta, tol):
         A = self._all_params()
-        m=np.all(np.abs(A-theta)<tol, axis=1)
-        if not m.any(): return np.inf
-        return np.linalg.norm(A[m]-theta,axis=1).min()
+        m = np.all(np.abs(A - theta) < tol, axis=1)
+        if not m.any():
+            return np.inf
+        return np.linalg.norm(A[m] - theta, axis=1).min()
+
     def add(self, theta, chi2, reward, pid, status, refine_passes=None):
         row_dict = {k: theta[i] for i, k in enumerate(self.params)}
-        row_dict |= dict(chi2=chi2, reward=reward, status=status, proposal_id=pid, refine_passes=refine_passes)
+        row_dict |= dict(
+            chi2=chi2,
+            reward=reward,
+            status=status,
+            proposal_id=pid,
+            refine_passes=refine_passes
+        )
         self._buf.append([row_dict.get(k) for k in self.cols])
         self._pbuf.append([theta[i] for i in range(len(self.params))])
         self._sbuf.append(status)
-        self._dirty+=1
-        if self._dirty>=self.flush:
+        self._dirty += 1
+        if self._dirty >= self.flush:
             self._flush_buf()
-            self.save(); self._dirty=0
+            self.save()
+            self._dirty = 0
+
+
 # ============================================================
 # Physics wrapper
 # ============================================================
 class Corpo:
     def __init__(self, engine):
         self.engine = engine
+
     def eval(self, theta):
         try:
-            chi2=float(self.engine(theta))
-            if not np.isfinite(chi2): return "numeric_fail",np.inf
-            return "pass",chi2
+            chi2 = float(self.engine(theta))
+            if not np.isfinite(chi2):
+                return "numeric_fail", np.inf
+            return "pass", chi2
         except FloatingPointError:
-            return "numeric_fail",np.inf
+            return "numeric_fail", np.inf
         except RuntimeError as e:
             import traceback
             print("[Corpo] RuntimeError:", repr(e))
@@ -137,50 +192,57 @@ class Corpo:
             raise
         except Exception:
             raise
+
+
 # ============================================================
 # AI helpers
 # ============================================================
 class Fixer:
-    def __init__(self,cfg):
-        self.warmup=int(cfg.get("AI_START_AFTER",500))
-        self.unlocked=False
+    def __init__(self, cfg):
+        self.warmup = int(cfg.get("AI_START_AFTER", 500))
+        self.unlocked = False
+
     def unlock(self, deck, runner):
-        if self.unlocked: return
-        if deck.df.status.str.startswith("pass").sum()>=self.warmup:
+        if self.unlocked:
+            return
+        if deck.df.status.str.startswith("pass").sum() >= self.warmup:
             runner.enable_ai()
-            self.unlocked=True
-            print("[AI] unlocked")
-    def reward(self,status,chi2):
-        if status!="pass": return -1e6
+            self.unlocked = True
+            print("[AI] unlocked", flush=True)
+
+    def reward(self, status, chi2):
+        if status != "pass":
+            return -1e6
         return -float(chi2)
+
+
 class FlatDetector:
-    def __init__(self,w,eps,p):
-        self.w,self.eps,self.p=w,eps,p
-        self.buf=deque(maxlen=w); self.cnt=0
-    def push(self,x):
-        if not np.isfinite(x): return
+    def __init__(self, w, eps, p):
+        self.w, self.eps, self.p = w, eps, p
+        self.buf = deque(maxlen=w)
+        self.cnt = 0
+
+    def push(self, x):
+        if not np.isfinite(x):
+            return
         self.buf.append(x)
-        if len(self.buf)<self.w: self.cnt=0; return
-        self.cnt=self.cnt+1 if np.std(self.buf)<self.eps and np.isfinite(x) else 0
-    def flat(self): return self.cnt>=self.p
+        if len(self.buf) < self.w:
+            self.cnt = 0
+            return
+        self.cnt = self.cnt + 1 if np.std(self.buf) < self.eps and np.isfinite(x) else 0
+
+    def flat(self):
+        return self.cnt >= self.p
+
 
 class ConvergenceDetector:
-    """Stop when the top-N posterior is tight and stable.
-
-    Checks every CONVERGE_CHECK_EVERY runs (only after fill_mode is active).
-    Requires CONVERGE_PATIENCE consecutive passing checks to stop — guards
-    against transient tightening early in fill mode.
-
-    Thresholds are intentionally tighter than detect_basin (0.05 vs 0.15)
-    so fill_mode has time to densify before we call it done.
-    """
     def __init__(self, cfg, bounds, cols):
-        self.rel_thr  = float(cfg.get("CONVERGE_REL_SPREAD",  0.05))
-        self.chi_thr  = float(cfg.get("CONVERGE_CHI_STD",     0.5))
-        self.n_top    = int(cfg.get("CONVERGE_N_TOP",          200))
-        self.n_min    = int(cfg.get("CONVERGE_MIN_PASS",       500))
-        self.patience = int(cfg.get("CONVERGE_PATIENCE",       3))
-        self.every    = int(cfg.get("CONVERGE_CHECK_EVERY",    500))
+        self.rel_thr  = float(cfg.get("CONVERGE_REL_SPREAD", 0.05))
+        self.chi_thr  = float(cfg.get("CONVERGE_CHI_STD", 0.5))
+        self.n_top    = int(cfg.get("CONVERGE_N_TOP", 200))
+        self.n_min    = int(cfg.get("CONVERGE_MIN_PASS", 500))
+        self.patience = int(cfg.get("CONVERGE_PATIENCE", 3))
+        self.every    = int(cfg.get("CONVERGE_CHECK_EVERY", 500))
         self.bounds   = bounds
         self.cols     = cols
         self.cnt      = 0
@@ -190,65 +252,80 @@ class ConvergenceDetector:
             return False
         if runs % self.every != 0:
             return False
+
         good = deck.df[deck.df.status.str.startswith("pass")]
         if len(good) < self.n_min:
             self.cnt = 0
             return False
-        top        = good.nsmallest(min(len(good), self.n_top), "chi2")
-        chi_std    = top["chi2"].std()
-        spread     = np.std(top[self.cols].values, axis=0)
-        span       = np.array([hi - lo for lo, hi in self.bounds])
+
+        top = good.nsmallest(min(len(good), self.n_top), "chi2")
+        chi_std = top["chi2"].std()
+        spread = np.std(top[self.cols].values, axis=0)
+        span = np.array([hi - lo for lo, hi in self.bounds])
         rel_spread = np.mean(spread / span)
+
         if chi_std < self.chi_thr and rel_spread < self.rel_thr:
             self.cnt += 1
         else:
             self.cnt = 0
+
         converged = self.cnt >= self.patience
         if converged:
-            print(f"[Converge] posterior converged at run {runs}: "
-                  f"rel_spread={rel_spread:.4f} chi_std={chi_std:.4f}", flush=True)
+            print(
+                f"[Converge] posterior converged at run {runs}: "
+                f"rel_spread={rel_spread:.4f} chi_std={chi_std:.4f}",
+                flush=True
+            )
         return converged
+
+
 # ============================================================
 # Runner
 # ============================================================
 class Runner:
-    def __init__(self,cfg):
-        self.cfg=cfg
-        self.bounds=cfg["THETA_BOUNDS"]
-        self.cols=cfg["PARAMETER_NAMES"]
-        self.dim=len(self.cols)
-        self.batch=int(cfg["BATCH_SIZE"])
-        self.min_d=float(cfg["MIN_DISTANCE"])
-        self.ai=False
-        self.model=None; self.agent=None
-        self.opt_m=None; self.opt_a=None
-        self.noise0=float(cfg.get("AI_NOISE_INIT",0.3))
-        self.noise1=float(cfg.get("AI_NOISE_MIN",0.02))
-        self.tau=float(cfg.get("AI_NOISE_TAU",5000))
-        self.step=0
-        self.recent=deque(maxlen=5000)
-        self.scaler=IdentityScaler() if StandardScaler is None else StandardScaler()
-        self.scaled=False
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.bounds = cfg["THETA_BOUNDS"]
+        self.cols = cfg["PARAMETER_NAMES"]
+        self.dim = len(self.cols)
+        self.batch = int(cfg["BATCH_SIZE"])
+        self.min_d = float(cfg["MIN_DISTANCE"])
+        self.ai = False
+        self.model = None
+        self.agent = None
+        self.opt_m = None
+        self.opt_a = None
+        self.noise0 = float(cfg.get("AI_NOISE_INIT", 0.3))
+        self.noise1 = float(cfg.get("AI_NOISE_MIN", 0.02))
+        self.tau = float(cfg.get("AI_NOISE_TAU", 5000))
+        self.step = 0
+        self.recent = deque(maxlen=5000)
+        self.scaler = IdentityScaler() if StandardScaler is None else StandardScaler()
+        self.scaled = False
         self.fill_mode = False
         self.fill_triggered = False
         self.explore_frac = float(cfg.get("EXPLORE_FRACTION", 0.0))
-        
+
     def enable_ai(self):
-        self.model=Model(self.dim)
-        self.agent=Agent(self.dim)
-        self.opt_m=torch.optim.Adam(self.model.parameters(),1e-3)
-        self.opt_a=torch.optim.Adam(self.agent.parameters(),1e-3)
-        self.ai=True
+        self.model = Model(self.dim)
+        self.agent = Agent(self.dim)
+        self.opt_m = torch.optim.Adam(self.model.parameters(), 1e-3)
+        self.opt_a = torch.optim.Adam(self.agent.parameters(), 1e-3)
+        self.ai = True
+
     def _noise(self):
-        if not self.ai: return self.noise0
-        return max(self.noise1, self.noise0*np.exp(-self.step/self.tau))
-    def _base(self,deck):
-        good=deck.df[deck.df.status.str.startswith("pass")]
-        if len(good)>=10:
+        if not self.ai:
+            return self.noise0
+        return max(self.noise1, self.noise0 * np.exp(-self.step / self.tau))
+
+    def _base(self, deck):
+        good = deck.df[deck.df.status.str.startswith("pass")]
+        if len(good) >= 10:
             if np.random.rand() < 0.15:
                 return good[self.cols].sample(1).values[0]
-            return good.nsmallest(min(len(good),500),"chi2")[self.cols].sample(1).values[0]
+            return good.nsmallest(min(len(good), 500), "chi2")[self.cols].sample(1).values[0]
         return deck.df[self.cols].dropna().sample(1).values[0]
+
     def detect_basin(self, deck):
         good = deck.df[deck.df.status.str.startswith("pass")]
         if len(good) < 500:
@@ -259,8 +336,12 @@ class Runner:
         spread = np.std(X, axis=0)
         span = np.array([hi - lo for lo, hi in self.bounds])
         rel_spread = np.mean(spread / span)
-        return (chi_std < 1.0) and (rel_spread < 0.15) and ("refine_passes" in good.columns and good["refine_passes"].fillna(0).median() >= self.cfg.get("MAX_REFINE", 0))
-    
+        return (
+            (chi_std < 1.0) and
+            (rel_spread < 0.15) and
+            ("refine_passes" in good.columns and good["refine_passes"].fillna(0).median() >= self.cfg.get("MAX_REFINE", 0))
+        )
+
     def step_scale(self, deck):
         if not self.ai:
             return 0.2
@@ -274,65 +355,84 @@ class Runner:
         rel = np.mean(spread / span)
         return clamp(0.01 + 0.2 * rel, 0.01, 0.05)
 
-
-    def propose(self,deck):
-        out=[]
-        while len(out)<self.batch:
+    def propose(self, deck):
+        out = []
+        while len(out) < self.batch:
             if self.ai and not (self.explore_frac > 0 and np.random.rand() < self.explore_frac):
                 if self.fill_mode:
                     good = deck.df[deck.df.status.str.startswith("pass")]
-                    base = good.nsmallest(100,"chi2")[self.cols].sample(1).values[0]
+                    base = good.nsmallest(100, "chi2")[self.cols].sample(1).values[0]
                 else:
                     base = self._base(deck)
-                xb=self.scaler.transform(base.reshape(1,-1)) if self.scaled else base.reshape(1,-1)
-                a=self.agent.act(torch.tensor(xb,dtype=torch.float32),self._noise()).numpy().squeeze()
+                xb = self.scaler.transform(base.reshape(1, -1)) if self.scaled else base.reshape(1, -1)
+                a = self.agent.act(torch.tensor(xb, dtype=torch.float32), self._noise()).numpy().squeeze()
                 s = self.step_scale(deck)
                 if self.fill_mode and self.step % 200 == 0:
-                    print(f"[FillMode] step_scale={s:.4f}")
-                theta=[clamp(base[i]+s*(hi-lo)*a[i],lo,hi)
-                    for i,(lo,hi) in enumerate(self.bounds)]
+                    print(f"[FillMode] step_scale={s:.4f}", flush=True)
+                theta = [clamp(base[i] + s * (hi - lo) * a[i], lo, hi)
+                         for i, (lo, hi) in enumerate(self.bounds)]
             else:
-                theta=random_theta(self.bounds)
-            if deck.is_forbidden(theta): continue
+                theta = random_theta(self.bounds)
+
+            if deck.is_forbidden(theta):
+                continue
             if not self.fill_mode:
-                if min_dist(theta,self.recent)<self.min_d: continue
-                if deck.nearest_distance(theta,self.min_d)<self.min_d: continue
+                if min_dist(theta, self.recent) < self.min_d:
+                    continue
+                if deck.nearest_distance(theta, self.min_d) < self.min_d:
+                    continue
+
             self.recent.append(theta)
-            self.step+=1
-            out.append((theta,self.step))
+            self.step += 1
+            out.append((theta, self.step))
         return out
-    def train(self,deck):
-        if not self.ai: return
-        df=deck.df[deck.df.status.str.startswith("pass") & np.isfinite(deck.df.reward)]
-        if len(df)<200: return
-        if len(df)>5000: df=df.tail(5000)
-        X=df[self.cols].values
-        y=df.reward.values.reshape(-1,1)
+
+    def train(self, deck):
+        if not self.ai:
+            return
+        df = deck.df[deck.df.status.str.startswith("pass") & np.isfinite(deck.df.reward)]
+        if len(df) < 200:
+            return
+        if len(df) > 5000:
+            df = df.tail(5000)
+
+        X = df[self.cols].values
+        y = df.reward.values.reshape(-1, 1)
+
         if not self.scaled:
-            self.scaler.fit(X); self.scaled=True
-        Xt=torch.tensor(self.scaler.transform(X),dtype=torch.float32)
-        yt=torch.tensor(y,dtype=torch.float32)
-        loss=((self.model(Xt)-yt)**2).mean()
-        self.opt_m.zero_grad(); loss.backward(); self.opt_m.step()
-        
+            self.scaler.fit(X)
+            self.scaled = True
+
+        Xt = torch.tensor(self.scaler.transform(X), dtype=torch.float32)
+        yt = torch.tensor(y, dtype=torch.float32)
+        loss = ((self.model(Xt) - yt) ** 2).mean()
+        self.opt_m.zero_grad()
+        loss.backward()
+        self.opt_m.step()
+
+
 # ============================================================
 # Daemon
 # ============================================================
 def run_daemon(config, physics_engine):
     from collections import defaultdict
 
-    deck    = Deck(config)
-    runner  = Runner(config)
-    corpo   = Corpo(physics_engine)
-    fixer   = Fixer(config)
-    flat    = FlatDetector(config.get("FLAT_WINDOW", 200), config.get("FLAT_THRESHOLD", 1e-6), config.get("FLAT_PATIENCE", 3))
+    deck     = Deck(config)
+    runner   = Runner(config)
+    corpo    = Corpo(physics_engine)
+    fixer    = Fixer(config)
+    flat     = FlatDetector(
+        config.get("FLAT_WINDOW", 200),
+        config.get("FLAT_THRESHOLD", 1e-6),
+        config.get("FLAT_PATIENCE", 3)
+    )
     converge = ConvergenceDetector(config, config["THETA_BOUNDS"], config["PARAMETER_NAMES"])
 
     runs = 0
     best = np.inf
 
-    t_acc  = defaultdict(float)
-    t_cnt  = defaultdict(int)
+    t_acc = defaultdict(float)
+    t_cnt = defaultdict(int)
     PROF_EVERY = int(config.get("PROF_EVERY", 25))
 
     obs       = getattr(physics_engine, "__wrapped_obs__", None)
@@ -343,14 +443,13 @@ def run_daemon(config, physics_engine):
         from juliacall import Main
         import juliacall
         jl_batch = Main.OSPMPhysicsSpherical.evaluate_batch_theta
-        sini     = float(obs.sini)
-        Norbit   = int(obs.Norbit)
-        print(f"[Daemon] batch mode ON — Norbit={Norbit}, Nstar_vlos={obs.Nstar_vlos}")
+        sini   = float(obs.sini)
+        Norbit = int(obs.Norbit)
+        print(f"[Daemon] batch mode ON — Norbit={Norbit}, Nstar_vlos={obs.Nstar_vlos}", flush=True)
     else:
-        print("[Daemon] batch mode OFF — falling back to serial corpo.eval")
+        print("[Daemon] batch mode OFF — falling back to serial corpo.eval", flush=True)
 
     while runs < config["MAX_RUNS"]:
-
         print(f"[Daemon] loop iter runs={runs}", flush=True)
         t0 = time.perf_counter()
 
@@ -362,15 +461,10 @@ def run_daemon(config, physics_engine):
             rho_s, r_s, MBH = theta
             variants = [
                 ("full", theta),
-
-                # clean isolation
                 ("bh_only",   [0.0,   r_s, MBH]),
                 ("halo_only", [rho_s, r_s, 0.0]),
-
-                # true local perturbations (keep the other component!)
                 ("bh_up",     [rho_s, r_s, MBH * 2.0]),
                 ("bh_down",   [rho_s, r_s, MBH * 0.5]),
-
                 ("halo_up",   [rho_s * 2.0, r_s, MBH]),
                 ("halo_down", [rho_s * 0.5, r_s, MBH]),
             ]
@@ -382,19 +476,14 @@ def run_daemon(config, physics_engine):
 
         print(f"[Daemon] proposing {len(props)} variants, starting eval...", flush=True)
 
-        t0 = time.perf_counter()
         _jnt = os.environ.get("JULIA_NUM_THREADS", "1")
-        _nthreads = os.cpu_count() or 1 if _jnt == "auto" else int(_jnt)
-        # Default: one Julia call per daemon iteration so :dynamic has the full
-        # props list to load-balance. A fixed CHUNK < len(props) risks a small
-        # fractional last-chunk that maps 1:1 to threads (e.g. 560 props /
-        # CHUNK=240 → last chunk=80=nthreads, defeating the fix).
+        _nthreads = (os.cpu_count() or 1) if _jnt == "auto" else int(_jnt)
         CHUNK = int(config.get("CHUNK_SIZE", max(3 * _nthreads, len(props))))
 
         def _record(theta, pid, label, status, chi2, refine_passes):
             nonlocal best, runs
-            base_reward = fixer.reward(status, chi2)
 
+            base_reward = fixer.reward(status, chi2)
             if status == "pass":
                 stability = 1.0 - (refine_passes / max(1, config.get("MAX_REFINE", 1)))
                 reward = base_reward + 0.5 * stability
@@ -406,37 +495,46 @@ def run_daemon(config, physics_engine):
             t_acc["add"] += time.perf_counter() - t_add
             t_cnt["add"] += 1
 
-            flat.push(chi2 if refine_passes >= config.get("MAX_REFINE", 0) else np.inf)
-            fixer.unlock(deck, runner)
-
-            if chi2 < best:
-                best = chi2
+            valid_pass = (status == "pass") and np.isfinite(chi2) and (chi2 > 1e-12)
+            if valid_pass:
+                flat.push(chi2 if refine_passes >= config.get("MAX_REFINE", 0) else np.inf)
+                fixer.unlock(deck, runner)
+                if chi2 < best:
+                    best = chi2
+            else:
+                flat.push(np.inf)
 
             runs += 1
 
-            if not runner.fill_triggered:
-                if runner.detect_basin(deck):
-                    runner.fill_mode = True
-                    runner.fill_triggered = True
-                    print(f"[Daemon] Basin detected at run {runs} — switching to fill mode")
+            if not runner.fill_triggered and runner.detect_basin(deck):
+                runner.fill_mode = True
+                runner.fill_triggered = True
+                print(f"[Daemon] Basin detected at run {runs} — switching to fill mode", flush=True)
 
             if runs % PROF_EVERY == 0:
                 def avg(k):
                     n = t_cnt[k]
                     return (t_acc[k] / n) if n else 0.0
 
-                t_eval    = t_acc["eval"]
+                t_eval = t_acc["eval"]
                 per_batch = t_eval / max(t_cnt["propose"], 1)
                 per_theta = t_eval / max(t_cnt["eval"], 1)
 
-                print(f"[PROF] runs={runs} best={best:.4f} propose={avg('propose'):.4f}s eval/batch={per_batch:.4f}s eval/theta={per_theta:.4f}s add={avg('add'):.4f}s", flush=True)
+                print(
+                    f"[PROF] runs={runs} best={best:.4f} "
+                    f"propose={avg('propose'):.4f}s "
+                    f"eval/batch={per_batch:.4f}s "
+                    f"eval/theta={per_theta:.4f}s "
+                    f"add={avg('add'):.4f}s",
+                    flush=True
+                )
 
                 t_acc.clear()
                 t_cnt.clear()
 
             if flat.flat():
                 deck.save()
-                print(f"[Daemon] Flat region detected after {runs} runs")
+                print(f"[Daemon] Flat region detected after {runs} runs", flush=True)
                 return True
 
             if converge.check(deck, runner, runs):
@@ -445,37 +543,45 @@ def run_daemon(config, physics_engine):
 
             return False
 
+        stop = False
+
         if use_batch:
             thetas = [theta for theta, pid, label in props]
-            stop = False
 
             for i in range(0, len(thetas), CHUNK):
-                chunk_props  = props[i:i+CHUNK]
-                chunk_thetas = thetas[i:i+CHUNK]
+                chunk_props  = props[i:i + CHUNK]
+                chunk_thetas = thetas[i:i + CHUNK]
                 theta_mat    = np.array(chunk_thetas, dtype=float).T
-
-                chunk_t0 = time.perf_counter()
+                chunk_t0     = time.perf_counter()
 
                 try:
                     NBINS_OCC  = config["OBSERVABLES"]["NBINS_OCC"]
                     LAMBDA_OCC = config["OBSERVABLES"]["LAMBDA_OCC"]
 
                     status_code_vec, chi2_vec, refine_vec = jl_batch(
-                        juliacall.convert(Main.Matrix[Main.Float64], theta_mat), juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m), juliacall.convert(Main.Vector[Main.Bool], obs.valid_vlos),
-                        juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps), juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
-                        sini, Norbit, halo_type, Nocc=NBINS_OCC, lambda_occ=LAMBDA_OCC, max_refine=config.get("MAX_REFINE", 0),
-                        timeout_s=float(config.get("EVAL_TIMEOUT_S", 120.0)))
+                        juliacall.convert(Main.Matrix[Main.Float64], theta_mat),
+                        juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m),
+                        juliacall.convert(Main.Vector[Main.Bool], obs.valid_vlos),
+                        juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps),
+                        juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
+                        sini, Norbit, halo_type,
+                        Nocc=NBINS_OCC,
+                        lambda_occ=LAMBDA_OCC,
+                        max_refine=config.get("MAX_REFINE", 0),
+                        timeout_s=float(config.get("EVAL_TIMEOUT_S", 120.0))
+                    )
 
                     t_acc["eval"] += time.perf_counter() - chunk_t0
                     t_cnt["eval"] += len(chunk_thetas)
 
                     for j, (theta, pid, label) in enumerate(chunk_props):
-
                         chi2 = float(chi2_vec[j])
                         code = int(status_code_vec[j])
-                        refine_passes = int(refine_vec[j])   # ← FIX
+                        refine_passes = int(refine_vec[j])
 
-                        if code == 0 and np.isfinite(chi2):
+                        valid_pass = (code == 0) and np.isfinite(chi2) and (chi2 > 1e-12)
+
+                        if valid_pass:
                             status = "pass"
                         elif code == 1:
                             status = "orbit_fail"
@@ -486,10 +592,10 @@ def run_daemon(config, physics_engine):
                         else:
                             status = "unknown_fail"
 
-                        if not np.isfinite(chi2):
+                        if not valid_pass:
                             chi2 = np.inf
 
-                        if _record(theta, pid, label, status, chi2, refine_passes):  # ← FIX
+                        if _record(theta, pid, label, status, chi2, refine_passes):
                             stop = True
                             break
 
@@ -499,7 +605,7 @@ def run_daemon(config, physics_engine):
                     print(f"[Daemon] chunk failed (size={len(chunk_thetas)}): {e}", flush=True)
 
                     for theta, pid, label in chunk_props:
-                        if _record(theta, pid, label, "numeric_fail", np.inf, 0):  # ← FIX
+                        if _record(theta, pid, label, "numeric_fail", np.inf, 0):
                             stop = True
                             break
 
@@ -510,11 +616,9 @@ def run_daemon(config, physics_engine):
             for theta, pid, label in props:
                 chunk_t0 = time.perf_counter()
                 status, chi2 = corpo.eval(theta)
-
                 t_acc["eval"] += time.perf_counter() - chunk_t0
                 t_cnt["eval"] += 1
-
-                if _record(theta, pid, label, status, chi2, 0):  # ← FIX
+                if _record(theta, pid, label, status, chi2, 0):
                     stop = True
                     break
 
