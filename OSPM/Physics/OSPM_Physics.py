@@ -181,30 +181,19 @@ def halo_kwargs_from_ctx(ctx):
 def build_A_matrix_stellar_julia(*, R_star_m, v_star_mps, verr_star_mps, sini, Norbit, theta, halo_type, return_occ=False, Nbins_occ=6, diag=False):
     if not USE_JULIA:
         raise RuntimeError("Stellar mode requires Julia")
-
     _jl_init()
-
-    rho_s, r_s, MBH, ht = assert_theta_contract(
-        theta,
-        halo_type=halo_type,
-        require_mbh=True
-    )
-
+    rho_s, r_s, MBH, ht = assert_theta_contract( theta, halo_type=halo_type, require_mbh=True)
     maybe_reset_orbit_cache((rho_s, r_s, MBH), ht)
-
     # ---- CRITICAL FIX ----
     # Explicitly convert Python arrays -> Julia Vector{Float64}
     PC = _Main.PythonCall
     VecF = _Main.Vector[_Main.Float64]
-
     R_py  = np.asarray(R_star_m, dtype=float)
     v_py  = np.asarray(v_star_mps, dtype=float)
     ve_py = np.asarray(verr_star_mps, dtype=float)
-
     Rj  = PC.pyconvert(VecF, R_py)
     vj  = PC.pyconvert(VecF, v_py)
     vej = PC.pyconvert(VecF, ve_py)
-
     out = _Main.OSPMPhysicsSpherical.build_A_matrix_stellar(int(Norbit), Rj, vj, vej, float(sini), float(rho_s), float(r_s), float(MBH), str(ht), return_occ=bool(return_occ), Nbins_occ=int(Nbins_occ), diag=bool(diag))
 
     if diag:
@@ -212,9 +201,6 @@ def build_A_matrix_stellar_julia(*, R_star_m, v_star_mps, verr_star_mps, sini, N
         return np.asarray(A, float), dict(meta)
 
     return np.asarray(out, float)
-
-
-
 def build_A_matrix(obs, ctx, *, return_occ=False, Nbins_occ=6, diag=False):
     mode = str(getattr(obs, "mode", "")).strip().lower()
     if mode != "stellar":
@@ -222,7 +208,6 @@ def build_A_matrix(obs, ctx, *, return_occ=False, Nbins_occ=6, diag=False):
     hk = halo_kwargs_from_ctx(ctx)
     theta = [hk["rho_s"], hk["r_s"], hk["MBH"]]
     halo_type = hk["halo_type"]
-
     vv = np.asarray(getattr(obs, "valid_vlos", None), bool) if hasattr(obs, "valid_vlos") else None
     if vv is None:
         has = np.asarray(getattr(obs, "has_vlos", None), bool) if hasattr(obs, "has_vlos") else None
