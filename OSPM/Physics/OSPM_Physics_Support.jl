@@ -61,7 +61,7 @@ struct HaloContext
     pot::Function
     frc::Function
 end
-const _HALO_CTX_CACHE = Dict{Tuple{Float64,Float64,Float64,Symbol,Int,Float64},HaloContext}()
+const _HALO_CTX_CACHE = Dict{Tuple{Float64,Float64,Float64,Float64,UInt64,Symbol,Int,Float64},HaloContext}()
 const _HALO_LOCK = ReentrantLock()
 
 # ============================================================
@@ -183,14 +183,53 @@ function rho_interp(rv, halo)
     end
     error("Unknown halo type: $(halo[:type])")
 end
-function halo_from_theta(rho_s, r_s, MBH; halo_type="nfw", alpha=nothing)
+
+@inline function normalize_stellar_model(stellar_model)
+    stellar_model === nothing && return nothing
+    out = Dict{Symbol,Any}()
+    for (k, v) in stellar_model
+        ks = k isa Symbol ? k : Symbol(String(k))
+        out[ks] = v
+    end
+    return out
+end
+
+
+@inline function stellar_model_sig(stellar_model)
+    stellar_model === nothing && return UInt(0)
+    return hash((get(stellar_model, :type, nothing), get(stellar_model, :Ltot, nothing), get(stellar_model, :a_pc, nothing)))
+end
+
+@inline function stellar_Menc_plummer(r::Float64, ML::Float64, Ltot::Float64, a::Float64)
+    rr = max(r, 1e-30)
+    Mtot = ML * Ltot * Msun
+    return Mtot * rr^3 / (rr^2 + a^2)^(3/2)
+end
+
+@inline function stellar_Phi_plummer(r::Float64, ML::Float64, Ltot::Float64, a::Float64)
+    rr = max(r, 1e-30)
+    Mtot = ML * Ltot * Msun
+    return -G * Mtot / sqrt(rr^2 + a^2)
+end
+
+function halo_from_theta(rho_s, r_s, MBH, ML; halo_type="nfw", alpha=nothing, stellar_model=nothing)
     ht = Symbol(lowercase(String(halo_type)))
-    h = Dict(:rho_s=>f64(rho_s)*Msun/pc^3, :r_s=>f64(r_s)*pc, :rs=>f64(r_s)*pc, :MBH=>f64(MBH)*Msun, :type=>ht, :rmin=>1e-6*f64(r_s)*pc)
+    h = Dict(
+        :rho_s => f64(rho_s) * Msun / pc^3,
+        :r_s   => f64(r_s) * pc,
+        :rs    => f64(r_s) * pc,
+        :MBH   => f64(MBH) * Msun,
+        :ML    => f64(ML),
+        :type  => ht,
+        :rmin  => 1e-6 * f64(r_s) * pc,
+    )
+    stellar_model !== nothing && (h[:stellar_model] = normalize_stellar_model(stellar_model))
     if ht === :einasto
         h[:alpha] = isnothing(alpha) ? 0.18 : f64(alpha)
     end
     return h
 end
+
 function tables_spherical(R, nlegup, halo, rhofn)
     halo=normalize_halo(halo); n=length(R)
     rho=similar(R); tabv=zeros(n); tabfr=zeros(n); Menc=zeros(n)
@@ -221,53 +260,96 @@ function tables_spherical(R, nlegup, halo, rhofn)
 
     tabv, tabfr, Menc
 end
+
 function make_potential_force_funcs(halo, R, nlegup, tabv, tabfr, Menc)
-    halo=normalize_halo(halo); MBH=f64(halo[:MBH]); rmin=f64(halo[:rmin])
-    rlgmin=log10(f64(R[1])); rlgmax=log10(f64(R[end])); np=length(R)
-    rlgmax>rlgmin || error("Degenerate R grid")
+    halo = normalize_halo(halo)
+    MBH  = f64(halo[:MBH])
+    ML   = haskey(halo, :ML) ? f64(halo[:ML]) : 0.0
+    rmin = f64(halo[:rmin])
+
+    stellar_model = get(halo, :stellar_model, nothing)
+    has_stars = stellar_model !== nothing && ML > 0.0
+
+    rlgmin = log10(f64(R[1]))
+    rlgmax = log10(f64(R[end]))
+    np = length(R)
+    rlgmax > rlgmin || error("Degenerate R grid")
 
     @inline function interp(arr, rr)
-        r=max(f64(rr),rmin)
-        lr=log10(r)
-        x=(lr-rlgmin)*(np-1)/(rlgmax-rlgmin)
-        x=clamp(x,0.0,np-1.0)
-        i0=Int(floor(x))+1
-        i1=min(i0+1,np)
-        t=x-(i0-1)
-        (1-t)*arr[i0] + t*arr[i1]
+        r = max(f64(rr), rmin)
+        lr = log10(r)
+        x = (lr - rlgmin) * (np - 1) / (rlgmax - rlgmin)
+        x = clamp(x, 0.0, np - 1.0)
+        i0 = Int(floor(x)) + 1
+        i1 = min(i0 + 1, np)
+        t = x - (i0 - 1)
+        (1 - t) * arr[i0] + t * arr[i1]
     end
 
-    pot(r,mu=0.0)=begin
-        rr=max(abs(f64(r)),rmin)
-        Ph=interp(tabv,rr)
-        Pbh=MBH>0 ? (-G*MBH/rr) : 0.0
-        Ph+Pbh
+    @inline function Mstar_enc(rr)
+        if !has_stars
+            return 0.0
+        end
+        stype = Symbol(lowercase(String(stellar_model[:type])))
+        if stype === :plummer
+            Ltot = f64(stellar_model[:Ltot])
+            a    = f64(stellar_model[:a_pc]) * pc
+            return stellar_Menc_plummer(rr, ML, Ltot, a)
+        else
+            error("Unknown stellar model type: $(stellar_model[:type])")
+        end
     end
 
-    frc(r,mu=0.0)=begin
-        rr=max(abs(f64(r)),rmin)
-        frh=interp(tabfr,rr)
-        frbh=MBH>0 ? (-G*MBH/(rr*rr)) : 0.0
-        frh+frbh, 0.0
+    @inline function Phistar(rr)
+        if !has_stars
+            return 0.0
+        end
+        stype = Symbol(lowercase(String(stellar_model[:type])))
+        if stype === :plummer
+            Ltot = f64(stellar_model[:Ltot])
+            a    = f64(stellar_model[:a_pc]) * pc
+            return stellar_Phi_plummer(rr, ML, Ltot, a)
+        else
+            error("Unknown stellar model type: $(stellar_model[:type])")
+        end
+    end
+
+    pot(r, mu=0.0) = begin
+        rr = max(abs(f64(r)), rmin)
+        Ph   = interp(tabv, rr)
+        Pbh  = MBH > 0 ? (-G * MBH / rr) : 0.0
+        Pstr = has_stars ? Phistar(rr) : 0.0
+        Ph + Pbh + Pstr
+    end
+
+    frc(r, mu=0.0) = begin
+        rr = max(abs(f64(r)), rmin)
+        frh  = interp(tabfr, rr)
+        frbh = MBH > 0 ? (-G * MBH / (rr * rr)) : 0.0
+        frst = has_stars ? (-G * Mstar_enc(rr) / (rr * rr)) : 0.0
+        frh + frbh + frst, 0.0
     end
 
     pot, frc, R
 end
-function build_halo_context(rho_s, r_s, MBH, halo_type; nR=DEFAULT_NR, rmax_factor=DEFAULT_RMAX_FACTOR)
-    halo=halo_from_theta(rho_s,r_s,MBH; halo_type=halo_type)
-    R=build_R_halo_physical(nR; rmin=halo[:rmin], rmax=rmax_factor*halo[:rs])
-    tabv,tabfr,Menc=tables_spherical(R,1,halo,rho_interp)
-    pot,frc,_=make_potential_force_funcs(halo,R,1,tabv,tabfr,Menc)
-    HaloContext(halo,f64.(R),tabv,tabfr,Menc,pot,frc)
+
+function build_halo_context(rho_s, r_s, MBH, ML, halo_type; stellar_model=nothing, nR=DEFAULT_NR, rmax_factor=DEFAULT_RMAX_FACTOR)
+    halo = halo_from_theta(rho_s, r_s, MBH, ML; halo_type=halo_type, stellar_model=stellar_model)
+    R = build_R_halo_physical(nR; rmin=halo[:rmin], rmax=rmax_factor * halo[:rs])
+    tabv, tabfr, Menc = tables_spherical(R, 1, halo, rho_interp)
+    pot, frc, _ = make_potential_force_funcs(halo, R, 1, tabv, tabfr, Menc)
+    HaloContext(halo, f64.(R), tabv, tabfr, Menc, pot, frc)
 end
-function get_halo_context(rho_s, r_s, MBH, halo_type; nR=DEFAULT_NR, rmax_factor=DEFAULT_RMAX_FACTOR)
+
+function get_halo_context(rho_s, r_s, MBH, ML, halo_type; stellar_model=nothing, nR=DEFAULT_NR, rmax_factor=DEFAULT_RMAX_FACTOR)
     ht = Symbol(lowercase(String(halo_type)))
-    key = ( _quant(f64(rho_s)), _quant(f64(r_s)), _quant(f64(MBH)), ht, nR, _quant(f64(rmax_factor)))
+    sig = stellar_model_sig(stellar_model)
+    key = (_quant(f64(rho_s)), _quant(f64(r_s)), _quant(f64(MBH)), _quant(f64(ML)), sig, ht, nR, _quant(f64(rmax_factor)))
     lock(_HALO_LOCK)
     ctx = get(_HALO_CTX_CACHE, key, nothing)
     unlock(_HALO_LOCK)
     ctx !== nothing && return ctx
-    newctx = build_halo_context(rho_s, r_s, MBH, ht; nR=nR, rmax_factor=rmax_factor)
+    newctx = build_halo_context(rho_s, r_s, MBH, ML, ht; stellar_model=stellar_model, nR=nR, rmax_factor=rmax_factor)
     lock(_HALO_LOCK)
     ctx = get(_HALO_CTX_CACHE, key, nothing)
     if ctx === nothing
@@ -408,6 +490,7 @@ function stellar_log_likelihood_jl(A::Matrix{Float64}, w::Vector{Float64}, verr:
     end
     return ll
 end
+
 function solve_weights_stellar_jl(A::Matrix{Float64}, verr::Vector{Float64}; rv_mask::Union{Vector{Bool},Nothing}=nothing, Nocc::Int=0, lambda_occ::Float64=0.0, alpha::Float64=DEFAULT_ALPHA, maxiter::Int=DEFAULT_MAXITER, eps::Float64=DEFAULT_LOG_EPS, sigma_floor_mps::Float64=DEFAULT_SIGMA_FLOOR_MPS, seed::UInt=UInt(0))
     Nstar  = size(A, 1) - Nocc
     Norbit = size(A, 2)
@@ -436,7 +519,14 @@ function solve_weights_stellar_jl(A::Matrix{Float64}, verr::Vector{Float64}; rv_
     return (w ./ s, true)
 end
 
-
+mass_enclosed_two_radii(rin, rout, rho_s, r_s, MBH, ML, halo_type; stellar_model=nothing) = begin
+    ctx = get_halo_context(rho_s, r_s, MBH, ML, halo_type; stellar_model=stellar_model)
+    r1 = max(rin, ctx.halo[:rmin])
+    r2 = max(rout, 1.001 * r1)
+    fr1, _ = ctx.frc(r1, 0.0)
+    fr2, _ = ctx.frc(r2, 0.0)
+    (-r1 * r1 * fr1 / G, -r2 * r2 * fr2 / G)
+end
 # ============================================================
 # Resolution / refinement support
 # ============================================================
@@ -536,12 +626,7 @@ const _dbg_orbit_count=Ref(0)
 
 reset_orbit_cache() = (lock(_HALO_LOCK); empty!(_HALO_CTX_CACHE); unlock(_HALO_LOCK); nothing)
 
-mass_enclosed_two_radii(rin,rout,rho_s,r_s,MBH,halo_type)=begin
-    ctx=get_halo_context(rho_s,r_s,MBH,halo_type)
-    r1=max(rin,ctx.halo[:rmin]); r2=max(rout,1.001*r1)
-    fr1,_=ctx.frc(r1,0.0); fr2,_=ctx.frc(r2,0.0)
-    (-r1*r1*fr1/G, -r2*r2*fr2/G)
-end
+
 
 function _orbit_template_key(shells::Vector{Float64}, Lfrac::NTuple)
     return hash((shells, Lfrac))
@@ -663,20 +748,20 @@ function build_A_matrix_from_ctx(ctx::HaloContext, th0, dt, r_centers_m, valid, 
     return A
 end
 
-function build_A_matrix_julia(r0_unused, th0, dt, Etot_unused, xLz_unused, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type)
-    build_A_matrix_julia(th0, dt, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type)
+function build_A_matrix_julia(r0_unused, th0, dt, Etot_unused, xLz_unused, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, ML, halo_type)
+    build_A_matrix_julia(th0, dt, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, ML, halo_type)
 end
-build_A_matrix_julia(th0, dt, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, halo_type) =
-    build_A_matrix_from_ctx(get_halo_context(rho_s,r_s,MBH,halo_type), th0, dt, r_centers_m, valid, sini, nsteps)
+
+build_A_matrix_julia(th0, dt, r_centers_m, valid, sini, nsteps, rho_s, r_s, MBH, ML, halo_type) =
+    build_A_matrix_from_ctx(get_halo_context(rho_s, r_s, MBH, ML, halo_type), th0, dt, r_centers_m, valid, sini, nsteps)
 
 ospm_runcheck(theta, args...) =
-    build_A_matrix_julia(args..., theta[1], theta[2], length(theta)>2 ? theta[3] : 0.0)
+    build_A_matrix_julia(args..., theta[1], theta[2], length(theta)>2 ? theta[3] : 0.0, length(theta)>3 ? theta[4] : 1.0)
 
 # Back-compat wrapper: treats all stars as having vlos.
-function build_A_matrix_stellar(Norbit::Int, R_star_m::Vector{Float64}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC, dt_frac_orbit::Float64=DEFAULT_DT_FRAC, dR_frac::Float64=DEFAULT_DR_FRAC, dR_floor_frac::Float64=DEFAULT_DR_FLOOR_FRAC, dR_floor_pc::Float64=DEFAULT_DR_FLOOR_PC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS, diag::Bool=false)
-    
+function build_A_matrix_stellar(Norbit::Int, R_star_m::Vector{Float64}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, ML::Float64, halo_type::String; stellar_model=nothing, nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC, dt_frac_orbit::Float64=DEFAULT_DT_FRAC, dR_frac::Float64=DEFAULT_DR_FRAC, dR_floor_frac::Float64=DEFAULT_DR_FLOOR_FRAC, dR_floor_pc::Float64=DEFAULT_DR_FLOOR_PC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS, diag::Bool=false)
     has_vlos = trues(length(R_star_m))
-    build_A_matrix_hybrid(Norbit, R_star_m, has_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, halo_type; nsteps=nsteps, Lfrac=Lfrac, dt_frac_orbit=dt_frac_orbit, dR_frac=dR_frac, Nbins_occ=Nbins_occ, return_occ=return_occ, max_attempts_factor=max_attempts_factor, diag=diag)
+    build_A_matrix_hybrid(Norbit, R_star_m, has_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, ML, halo_type; stellar_model=stellar_model, nsteps=nsteps, Lfrac=Lfrac, dt_frac_orbit=dt_frac_orbit, dR_frac=dR_frac, Nbins_occ=Nbins_occ, return_occ=return_occ, max_attempts_factor=max_attempts_factor, diag=diag)
 end
 
 # --- WLS / NNLS (not used by current pipeline) ---

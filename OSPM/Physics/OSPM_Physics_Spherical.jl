@@ -2,7 +2,7 @@
 #
 # WHAT THIS DOES
 # Orbit-superposition physics engine for spherical dark-matter halo modelling.
-# Given halo parameters θ = (ρ_s, r_s, M_BH), builds a gravitational potential,
+# Given halo parameters θ = (ρ_s, r_s, M_BH, M/L), builds a gravitational potential,
 # launches a library of stellar orbits at various apocenter radii and angular-
 # momentum fractions, then projects each orbit onto observables (line-of-sight
 # velocity likelihoods + radial occupancy histograms) to form the A-matrix.
@@ -162,12 +162,14 @@ function _orbit_worker!(st::OrbitWorkState, rng)
 end
 
 # Main A-matrix builder: maps orbital weights → observables (vlos likelihoods + occupancy). Parallel, numerically hardened.
-function build_A_matrix_hybrid(Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, halo_type::String; nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC, dt_frac_orbit::Float64=DEFAULT_DT_FRAC, dR_frac::Float64=DEFAULT_DR_FRAC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS, diag::Bool=false, threaded::Bool=true, fill_pct::Float64=0.80, t_deadline::UInt64=typemax(UInt64))
-
+function build_A_matrix_hybrid(Norbit::Int, R_star_m::Vector{Float64}, has_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, rho_s::Float64, r_s::Float64, MBH::Float64, ML::Float64, halo_type::String; stellar_model=nothing, nsteps::Int=DEFAULT_NSTEPS, Lfrac::NTuple{5,Float64}=DEFAULT_LFRAC, dt_frac_orbit::Float64=DEFAULT_DT_FRAC, dR_frac::Float64=DEFAULT_DR_FRAC, Nbins_occ::Int=DEFAULT_NBINS_OCC, return_occ::Bool=true, max_attempts_factor::Int=DEFAULT_MAX_ATTEMPTS, diag::Bool=false, threaded::Bool=true, fill_pct::Float64=0.80, t_deadline::UInt64=typemax(UInt64))
     Nstar = length(R_star_m)
-    @assert length(has_vlos) == Nstar;  @assert length(v_star_mps) == Nstar;  @assert length(verr_star_mps) == Nstar
+    @assert length(has_vlos) == Nstar; @assert length(v_star_mps) == Nstar; @assert length(verr_star_mps) == Nstar
     Nstar == 0 && return zeros(Float64, 0, Norbit)
-    ctx = get_halo_context(rho_s, r_s, MBH, halo_type);  sini = clamp01(f64(sini));  Rmin = minimum(R_star_m);  Rmax = maximum(R_star_m)
+    stellar_model_jl = normalize_stellar_model(stellar_model)
+    ctx = get_halo_context(rho_s, r_s, MBH, ML, halo_type; stellar_model=stellar_model_jl)
+    sini = clamp01(f64(sini)); Rmin = minimum(R_star_m); Rmax = maximum(R_star_m)
+
     if !(isfinite(Rmin) && isfinite(Rmax) && Rmax > Rmin)
         Nvlos = count(has_vlos);  Nout = Nvlos + (return_occ ? Nbins_occ : 0)
         return zeros(Float64, Nout, Norbit)
@@ -237,10 +239,11 @@ end
 # Batch evaluator w/ work-stealing.
 # Phase 1: each thread claims thetas, inits OrbitWorkState, runs orbits, solves weights+likelihood.
 # Phase 2: idle threads join any theta still in orbit phase. Keeps all cores saturated.
-function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{Float64}, valid_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, Norbit::Int, halo_type::String; Nocc::Int=0, lambda_occ::Float64=0.0, alpha::Float64=DEFAULT_ALPHA, maxiter::Int=DEFAULT_MAXITER, max_refine::Int=0, timeout_s::Float64=120.0)
-
-    nrow, nbatch = size(thetas);  ve_valid = verr_star_mps[valid_vlos];  Nvalid = length(ve_valid)
-    nu = max(count(valid_vlos) - 3, 1);  rv_mask = convert(Vector{Bool}, trues(Nvalid))
+function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{Float64}, valid_vlos::AbstractVector{Bool}, v_star_mps::Vector{Float64}, verr_star_mps::Vector{Float64}, sini::Float64, Norbit::Int, halo_type::String; stellar_model=nothing, Nocc::Int=0, lambda_occ::Float64=0.0, alpha::Float64=DEFAULT_ALPHA, maxiter::Int=DEFAULT_MAXITER, max_refine::Int=0, timeout_s::Float64=120.0)
+    stellar_model_jl = normalize_stellar_model(stellar_model)
+    nrow, nbatch = size(thetas); ve_valid = verr_star_mps[valid_vlos]; Nvalid = length(ve_valid)
+    nu = max(count(valid_vlos) - 4, 1); rv_mask = convert(Vector{Bool}, trues(Nvalid))
+   
     status = fill(4, nbatch);  refine_used = zeros(Int, nbatch);  chi2 = fill(Inf, nbatch)  # default = timeout/unprocessed
     # Shared orbit state per theta — visible to all threads for helping
     work_states = Vector{Union{Nothing, OrbitWorkState}}(undef, nbatch);  fill!(work_states, nothing)
@@ -261,14 +264,14 @@ function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{F
                     continue
                 end
                 try
-                    rho_s = Float64(thetas[1, i]);  r_s = Float64(thetas[2, i]);  MBH = nrow >= 3 ? Float64(thetas[3, i]) : 0.0
+                    rho_s = Float64(thetas[1, i]); r_s = Float64(thetas[2, i]); MBH = nrow >= 3 ? Float64(thetas[3, i]) : 0.0; ML = nrow >= 4 ? Float64(thetas[4, i]) : 1.0
                     Rmin_v = minimum(R_star_m);  Rmax_v = maximum(R_star_m)
                     if !(isfinite(Rmin_v) && isfinite(Rmax_v) && Rmax_v > Rmin_v) || length(R_star_m) == 0
                         status[i] = 1
                         chi2[i] = Inf
                         continue
                     end
-                    ctx = get_halo_context(rho_s, r_s, MBH, halo_type)
+                    ctx = get_halo_context(rho_s, r_s, MBH, ML, halo_type; stellar_model=stellar_model_jl)
                     ws = _init_orbit_work( Norbit, R_star_m, valid_vlos, v_star_mps, verr_star_mps, sini, ctx; nsteps=DEFAULT_NSTEPS, Lfrac=DEFAULT_LFRAC,
                         dt_frac_orbit=DEFAULT_DT_FRAC, Nbins_occ=Nocc, return_occ=true, max_attempts_factor=DEFAULT_MAX_ATTEMPTS, fill_pct=0.80, t_deadline=theta_deadline )
                     work_states[i] = ws  # publish and mark joinable
@@ -311,9 +314,7 @@ function evaluate_batch_theta(thetas::AbstractMatrix{<:Real}, R_star_m::Vector{F
                         for pass_i in 1:max_refine
                             passes_done = pass_i
                             time_ns() > theta_deadline && break
-                            A_r = build_A_matrix_hybrid( Norbit, R_star_m, valid_vlos, v_star_mps, verr_star_mps,
-                                sini, rho_s, r_s, MBH, halo_type;
-                                return_occ=true, Nbins_occ=Nocc, threaded=false, fill_pct=0.80, t_deadline=theta_deadline)
+                            A_r = build_A_matrix_hybrid(Norbit, R_star_m, valid_vlos, v_star_mps, verr_star_mps, sini, rho_s, r_s, MBH, ML, halo_type; stellar_model=stellar_model_jl, return_occ=true, Nbins_occ=Nocc, threaded=false, fill_pct=0.80, t_deadline=theta_deadline)
                             m_r, n_r = size(A_r);  (m_r == 0 || n_r == 0 || !all(isfinite, A_r)) && break
                             Nocc_eff_r = max(size(A_r, 1) - length(ve_valid), 0)
                             w_r, ok_r = solve_weights_stellar_jl(A_r, ve_valid; rv_mask=rv_mask, Nocc=Nocc_eff_r, lambda_occ=lambda_occ, alpha=alpha, maxiter=maxiter, seed=UInt(i + pass_i * nbatch))

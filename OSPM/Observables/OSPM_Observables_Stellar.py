@@ -3,23 +3,21 @@ OSPM_Observables_Stellar
 Star-level observable container for OSPM.
 One row per star. No binning. No physics.
 """
-
 import numpy as np
 from ..Physics.OSPM_Physics import pc, kms, make_inclination
 
-
 class OSPMObservablesStellar:
-    def __init__(self, *, R_star_pc, v_star_kms, verr_star_kms,
-                 has_vlos=None, inclination_deg, Norbit):
-
+    def __init__(self, *, R_star_pc, v_star_kms, verr_star_kms, has_vlos=None, inclination_deg, Norbit, stellar_model=None):
         self.mode = "stellar"
+
+        if stellar_model is not None and not isinstance(stellar_model, dict):
+            raise TypeError("stellar_model must be a dict or None")
+        self.stellar_model = stellar_model
 
         R  = np.asarray(R_star_pc, float)
         v  = np.asarray(v_star_kms, float)
         ve = np.asarray(verr_star_kms, float)
-
-        hv = (np.isfinite(v) & np.isfinite(ve)) if has_vlos is None \
-             else np.asarray(has_vlos, bool)
+        hv = (np.isfinite(v) & np.isfinite(ve)) if has_vlos is None else np.asarray(has_vlos, bool)
 
         if not (len(R) == len(v) == len(ve) == len(hv)):
             raise ValueError("Star arrays must have equal length")
@@ -28,10 +26,10 @@ class OSPMObservablesStellar:
         if not np.any(g):
             raise RuntimeError("No valid stars after geometric filtering")
 
-        self.R_star_pc   = R[g]
-        self.v_star_kms  = v[g]
+        self.R_star_pc = R[g]
+        self.v_star_kms = v[g]
         self.verr_star_kms = ve[g]
-        self.has_vlos    = hv[g]
+        self.has_vlos = hv[g]
 
         self.valid_vlos = (
             self.has_vlos
@@ -40,27 +38,24 @@ class OSPMObservablesStellar:
             & (self.verr_star_kms > 0)
         )
 
-        self.R_star_m       = self.R_star_pc * pc
-        self.v_star_mps     = self.v_star_kms * kms
-        self.verr_star_mps  = self.verr_star_kms * kms
+        self.R_star_m = self.R_star_pc * pc
+        self.v_star_mps = self.v_star_kms * kms
+        self.verr_star_mps = self.verr_star_kms * kms
 
         self.sini, self.cosi, self.edge_on = make_inclination(inclination_deg)
 
-        self.Norbit      = int(Norbit)
-        self.Nstar       = len(self.R_star_m)
-        self.Nstar_vlos  = int(self.valid_vlos.sum())
+        self.Norbit = int(Norbit)
+        self.Nstar = len(self.R_star_m)
+        self.Nstar_vlos = int(self.valid_vlos.sum())
 
         self.Nocc = 6
         self.lambda_occ = 0.3
 
     @classmethod
-    def from_star_table(cls, csv_path, *, r_col="r_pc",
-                        v_col="vlos", verr_col="vlos_err",
-                        inclination_deg, Norbit):
-
+    def from_star_table(cls, csv_path, *, r_col="r_pc", v_col="vlos", verr_col="vlos_err", inclination_deg, Norbit, stellar_model=None):
         import pandas as pd
-        df = pd.read_csv(csv_path)
 
+        df = pd.read_csv(csv_path)
         missing = [c for c in (r_col, v_col, verr_col) if c not in df.columns]
         if missing:
             raise KeyError(f"Missing required columns in star table: {missing}")
@@ -71,4 +66,5 @@ class OSPMObservablesStellar:
             verr_star_kms=df[verr_col].values,
             inclination_deg=inclination_deg,
             Norbit=Norbit,
+            stellar_model=stellar_model,
         )

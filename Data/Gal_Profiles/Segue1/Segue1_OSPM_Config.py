@@ -7,80 +7,95 @@ from Data.Data_Prep.Data_Paths import build_data_paths
 
 Galaxy = "Segue1"
 
-# ---------------------------------------------------------
+# Run mode toggle
+LOCAL_DEBUG = False   # True = local responsive run, False = full run / HPC-style
+
 # Profile root (this directory contains default/, data.csv, etc.)
-# ---------------------------------------------------------
 PROFILE_ROOT = Path(__file__).resolve().parent
 if not PROFILE_ROOT.exists():
     raise FileNotFoundError(f"PROFILE_ROOT does not exist: {PROFILE_ROOT}")
+
+# Mode-dependent knobs
+NORBIT = 800 if LOCAL_DEBUG else 2500
+BATCH_SIZE = 12 if LOCAL_DEBUG else 80
+MIN_BATCH_SIZE = 12 if LOCAL_DEBUG else 80
+MAX_BATCH_SIZE = 24 if LOCAL_DEBUG else 256
+CHUNK_SIZE = 12 if LOCAL_DEBUG else 90
+LOG_INTERVAL = 1 if LOCAL_DEBUG else 10
+PROF_EVERY = 2 if LOCAL_DEBUG else 25
+EVAL_TIMEOUT_S = 20.0 if LOCAL_DEBUG else 120.0
 
 CONFIG = {
     # =========================================================
     # Parallelization
     # =========================================================
-    "N_WORKERS": 24,   # local default; override via launcher on HPC
+    "N_WORKERS": 24,
 
     # =========================================================
     # Identity
     # =========================================================
-    "MODE":        "stellar",
-    "GALAXY":      Galaxy,
-    "HALO_TYPE":   "nfw",
+    "MODE":      "stellar",
+    "GALAXY":    Galaxy,
+    "HALO_TYPE": "nfw",
 
     # =========================================================
     # Galaxy geometry (declared, never fitted)
     # =========================================================
-    "RA0_DEG":          151.7667,
-    "DEC0_DEG":         16.0819,
-    "DISTANCE_PC":      23000.0,
+    "RA0_DEG":         151.7667,
+    "DEC0_DEG":        16.0819,
+    "DISTANCE_PC":     23000.0,
+    "PA_DEG":          None,
+    "AXIS_RATIO_Q":    1.0,
+    "R_HALF_LIGHT_PC": 29.0,
+    "R_MAX_STARS_PC":  120.0,
+    "INCLINATION_DEG": 90.0,
 
-    # Morphology (Segue 1 treated as spherical)
-    "PA_DEG":           None,
-    "AXIS_RATIO_Q":     1.0,
-    "R_HALF_LIGHT_PC":  29.0,
-    "R_MAX_STARS_PC":   120.0,
-
-    # Viewing geometry
-    "INCLINATION_DEG":  90.0,
+    # Fixed stellar light model (Segue 1)
+    "STELLAR_MODEL": {
+        "type": "plummer",
+        "Ltot": 340.0,
+        "a_pc": 22.4,
+    },
 
     # =========================================================
     # Data harvesting & quality
     # =========================================================
-    "RADIUS_DEG":   0.6,
-    "RUWE_MAX":     1.4,
-    "PAR_SNR_MIN":  5.0,
+    "RADIUS_DEG":  0.6,
+    "RUWE_MAX":    1.4,
+    "PAR_SNR_MIN": 5.0,
 
     # Column authority (Segue 1 conventions)
-    "STAR_R_COL":      "r_pc",
-    "STAR_V_COL":      "vlos",
-    "STAR_VERR_COL":   "vlos_err",
-    "RA_COL":          "ra",
-    "DEC_COL":         "dec",
-    "VLOS_COL":        "vlos",
+    "STAR_R_COL":    "r_pc",
+    "STAR_V_COL":    "vlos",
+    "STAR_VERR_COL": "vlos_err",
+    "RA_COL":        "ra",
+    "DEC_COL":       "dec",
+    "VLOS_COL":      "vlos",
 
     # =========================================================
     # OSPM numerical setup
     # =========================================================
-
-    "NORBIT":              2500,   # RESOLUTION
+    "NORBIT": NORBIT,
     "BINNING": {
-        "MIN_BINS":            4,
-        "N_TARGET_CIRC":       5,
-        "MIN_PER_BIN_CIRC":    3,
+        "MIN_BINS":         4,
+        "N_TARGET_CIRC":    5,
+        "MIN_PER_BIN_CIRC": 3,
     },
     "OBSERVABLES": {
-        "NBINS_OCC": 6,
+        "NBINS_OCC":  6,
         "LAMBDA_OCC": 0.3,
     },
+
     # =========================================================
     # Parameter space
     # =========================================================
-    "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA":   [37.37, 1987.0, 4.5e5],
+    "PARAMETER_NAMES": ["rho_s", "r_s", "MBH", "ML"],
+    "INITIAL_THETA":   [37.37, 1987.0, 5e5, 2.0],
     "THETA_BOUNDS": [
-        (0.5, 400.0),     # rho_s
-        (300, 5000.0),    # r_s
-        (0.0, 5e6),      # MBH
+        (0.5, 400.0),
+        (300, 10000.0),
+        (0.0, 5e6),
+        (0.2, 2.0),
     ],
 
     # Penalties
@@ -100,55 +115,54 @@ CONFIG = {
     # =========================================================
     # Deck semantics
     # =========================================================
-    "REQUIRE_COLUMNS": ["rho_s", "r_s", "MBH", "chi2", "reward", "status", "proposal_id"],
-    "ALLOWED_STATUSES": [ "todo", "seed", "pass", "orbit_fail", "numeric_fail", "unknown_fail", "forbidden" ],
+    "REQUIRE_COLUMNS": ["rho_s", "r_s", "MBH", "ML", "chi2", "reward", "status", "proposal_id"],
+    "ALLOWED_STATUSES": ["todo", "seed", "pass", "orbit_fail", "numeric_fail", "unknown_fail", "forbidden"],
     "FILL_DEFAULT_STATUS": "todo",
 
     # =========================================================
     # Sampling & control
     # =========================================================
-    "BATCH_SIZE":          80,
-    "MIN_BATCH_SIZE":      80,
-    "MAX_BATCH_SIZE":      256,
-    "_PRINT_EVERY":        10,
-    "_print_counter":      1,
+    "BATCH_SIZE":     BATCH_SIZE,
+    "MIN_BATCH_SIZE": MIN_BATCH_SIZE,
+    "MAX_BATCH_SIZE": MAX_BATCH_SIZE,
+    "CHUNK_SIZE":     CHUNK_SIZE,
+    "_PRINT_EVERY":   10,
+    "_print_counter": 1,
 
     # =========================================================
     # AI / learning
     # =========================================================
-    "AI_START_AFTER":        300,
-    "MIN_TRAIN_POINTS":      300,
-    "TRAIN_WINDOW":          500,
-    "AI_NOISE_INIT":         0.30,
-    "AI_NOISE_MIN":          0.02,
-    "AI_NOISE_TAU":          5000,
-    "AI_MIN_DISTINCT_PASS":  800,
-    "RESET_INTERVAL":        10000,
-    "AI_DEBUG_EVERY":        200,
-    "AI_SNAPSHOT_EVERY":     2000,
-    "FLAT_WINDOW":           200,
-    "FLAT_THRESHOLD":        1e-6,
-    "FLAT_PATIENCE":         10,
-    "AI_RESET_ON_FLAT":      True,
+    "AI_START_AFTER":       300,
+    "MIN_TRAIN_POINTS":     300,
+    "TRAIN_WINDOW":         500,
+    "AI_NOISE_INIT":        0.30,
+    "AI_NOISE_MIN":         0.02,
+    "AI_NOISE_TAU":         5000,
+    "AI_MIN_DISTINCT_PASS": 800,
+    "RESET_INTERVAL":       10000,
+    "AI_DEBUG_EVERY":       200,
+    "AI_SNAPSHOT_EVERY":    2000,
+    "FLAT_WINDOW":          200,
+    "FLAT_THRESHOLD":       1e-6,
+    "FLAT_PATIENCE":        10,
+    "AI_RESET_ON_FLAT":     True,
 
     # =========================================================
     # Termination
     # =========================================================
-    "MAX_RUNS":              100000,
-    "STOP_NO_IMPROVEMENT":   1000,
-    "IMPROVEMENT_EPSILON":   1e-6,
-    "LOG_INTERVAL":          10,
-
-    # =========================================================
-    # Constants
-    # =========================================================
-    "G":    6.67430e-11,
-    "Msun": 1.98847e30,
+    "MAX_RUNS":            100000,
+    "STOP_NO_IMPROVEMENT": 1000,
+    "IMPROVEMENT_EPSILON": 1e-6,
+    "LOG_INTERVAL":        LOG_INTERVAL,
+    "PROF_EVERY":          PROF_EVERY,
+    "EVAL_TIMEOUT_S":      EVAL_TIMEOUT_S,
 
     # =========================================================
     # Paths (authoritative)
     # =========================================================
     **build_data_paths(PROFILE_ROOT),
-    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_local.csv"), # This creates the new local deck this is the only difference
+    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_local.csv"),
 }
+
 print("[CONFIG] CSV_PATH =", CONFIG["CSV_PATH"])
+print(f"[CONFIG] LOCAL_DEBUG={LOCAL_DEBUG} | NORBIT={CONFIG['NORBIT']} | BATCH={CONFIG['BATCH_SIZE']} | CHUNK={CONFIG['CHUNK_SIZE']}")

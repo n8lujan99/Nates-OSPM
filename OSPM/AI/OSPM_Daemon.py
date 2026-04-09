@@ -1,7 +1,7 @@
 # OSPM_Daemon.py — STAYS IN PYTHON FOREVER.  Parallelism lives in Julia, not here.
 #
 # WHAT THIS DOES
-# Drives an RL-guided search over dark-matter halo parameters θ = (ρ_s, r_s, M_BH).
+# Drives an RL-guided search over dark-matter halo parameters θ = (ρ_s, r_s, M_BH, M/L).
 # Each iteration proposes a batch of candidate θ, ships them to the Julia orbit-
 # superposition engine (OSPM_Physics) for χ² evaluation, records results in a CSV
 # ledger, and trains a small surrogate network + policy agent so future proposals
@@ -49,7 +49,9 @@
 # run_daemon(config,engine)  config,engine → None                — outer loop: propose→eval→record→train
 # ──────────────────────────────────────────────────────────────────────────────
 
+from logging import config
 import os, time, sys
+from unittest import runner
 import numpy as np, pandas as pd
 import torch, torch.nn as nn
 from collections import deque
@@ -264,9 +266,13 @@ class Runner:
         yt = torch.tensor(y, dtype=torch.float32)
         loss = ((self.model(Xt) - yt) ** 2).mean()
         self.opt_m.zero_grad(); loss.backward(); self.opt_m.step()
+        
 def run_daemon(config, physics_engine):
     from collections import defaultdict
     deck, runner, corpo, fixer = Deck(config), Runner(config), Corpo(physics_engine), Fixer(config)
+    print("CONFIG PARAMETER_NAMES:", config["PARAMETER_NAMES"])
+    print("CONFIG THETA_BOUNDS:", config["THETA_BOUNDS"])
+    print("runner.bounds:", runner.bounds)
     flat = FlatDetector(config.get("FLAT_WINDOW", 200), config.get("FLAT_THRESHOLD", 1e-6), config.get("FLAT_PATIENCE", 3))
     converge = ConvergenceDetector(config, config["THETA_BOUNDS"], config["PARAMETER_NAMES"])
     runs, best = 0, np.inf
@@ -276,26 +282,47 @@ def run_daemon(config, physics_engine):
 
     if use_batch:
         from juliacall import Main; import juliacall
+        stellar_model = getattr(obs, "stellar_model", None)
+        if stellar_model is not None:
+            stellar_model = { "type": str(stellar_model["type"]), "Ltot": float(stellar_model["Ltot"]), "a_pc": float(stellar_model["a_pc"])}
+        
         jl_batch = Main.OSPMPhysicsSpherical.evaluate_batch_theta; sini = float(obs.sini); Norbit = int(obs.Norbit)
         print(f"[Daemon] batch mode ON — Norbit={Norbit}, Nstar_vlos={obs.Nstar_vlos}", flush=True)
     else: print("[Daemon] batch mode OFF — falling back to serial corpo.eval", flush=True)
 
     while runs < config["MAX_RUNS"]:
         print(f"[Daemon] loop iter runs={runs}", flush=True); t0 = time.perf_counter()
-        deck._flush_buf(); base_props = runner.propose(deck)
+        deck._flush_buf()
+        base_props = runner.propose(deck)
+        print("base_props[:3] =", base_props[:3])
         props = []
         for theta, pid in base_props:
-            rho_s, r_s, MBH = theta
+            rho_s, r_s, MBH, ML = theta
             variants = [
-                ("full", theta),
-                ("bh_only",   [0.0,   r_s, MBH]),
-                ("halo_only", [rho_s, r_s, 0.0]),
-                ("bh_up",     [rho_s, r_s, MBH * 2.0]),
-                ("bh_down",   [rho_s, r_s, MBH * 0.5]),
-                ("halo_up",   [rho_s * 2.0, r_s, MBH]),
-                ("halo_down", [rho_s * 0.5, r_s, MBH]),
+                ("full",      [rho_s,        r_s, MBH,       ML]),
+                # isolate major gravitating components
+                ("bh_only",   [0.0,          r_s, MBH,       ML]),   # stars + BH, no halo
+                ("halo_only", [rho_s,        r_s, 0.0,       ML]),   # stars + halo, no BH
+                # BH perturbations
+                ("bh_up",     [rho_s,        r_s, MBH * 2.0, ML]),
+                ("bh_down",   [rho_s,        r_s, MBH * 0.5, ML]),
+                # halo perturbations
+                ("halo_up",   [rho_s * 2.0,  r_s, MBH,       ML]),
+                ("halo_down", [rho_s * 0.5,  r_s, MBH,       ML]),
+                # stellar M/L perturbations
+                ("ml_up",     [rho_s,        r_s, MBH,       ML * 2.0]),
+                ("ml_down",   [rho_s,        r_s, MBH,       ML * 0.5]),
             ]
+            # keep each perturbed theta inside bounds
+            bounded_variants = []
             for label, tvar in variants:
+                tfix = []
+                for k, x in enumerate(tvar):
+                    lo, hi = config["THETA_BOUNDS"][k]
+                    tfix.append(clamp(float(x), float(lo), float(hi)))
+                bounded_variants.append((label, tfix))
+
+            for label, tvar in bounded_variants:
                 props.append((tvar, pid, label))
 
         t_acc["propose"] += time.perf_counter() - t0; t_cnt["propose"] += 1
@@ -338,10 +365,14 @@ def run_daemon(config, physics_engine):
                 try:
                     NBINS_OCC, LAMBDA_OCC = config["OBSERVABLES"]["NBINS_OCC"], config["OBSERVABLES"]["LAMBDA_OCC"]
                     status_code_vec, chi2_vec, refine_vec = jl_batch(
-                        juliacall.convert(Main.Matrix[Main.Float64], theta_mat), juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m),
-                        juliacall.convert(Main.Vector[Main.Bool], obs.valid_vlos), juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps),
-                        juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps), sini, Norbit, halo_type,
-                        Nocc=NBINS_OCC, lambda_occ=LAMBDA_OCC, max_refine=config.get("MAX_REFINE", 0), timeout_s=float(config.get("EVAL_TIMEOUT_S", 120.0)))
+                        juliacall.convert(Main.Matrix[Main.Float64], theta_mat),
+                        juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m),
+                        juliacall.convert(Main.Vector[Main.Bool], obs.valid_vlos),
+                        juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps),
+                        juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
+                        sini, Norbit, halo_type, stellar_model=getattr(obs, "stellar_model", None),
+                        Nocc=NBINS_OCC, lambda_occ=LAMBDA_OCC, max_refine=config.get("MAX_REFINE", 0), timeout_s=float(config.get("EVAL_TIMEOUT_S", 120.0)),
+)
                     t_acc["eval"] += time.perf_counter() - chunk_t0; t_cnt["eval"] += len(chunk_thetas)
                     for j, (theta, pid, label) in enumerate(chunk_props):
                         chi2, code, refine_passes = float(chi2_vec[j]), int(status_code_vec[j]), int(refine_vec[j])
@@ -349,7 +380,6 @@ def run_daemon(config, physics_engine):
                         status = "pass" if valid_pass else {1: "orbit_fail", 2: "numeric_fail", 4: "timeout"}.get(code, "unknown_fail")
                         if not valid_pass: chi2 = np.inf
                         if _record(theta, pid, label, status, chi2, refine_passes): stop = True; break
-
                 except Exception as e:
                     t_acc["eval"] += time.perf_counter() - chunk_t0; t_cnt["eval"] += len(chunk_thetas)
                     print(f"[Daemon] chunk failed (size={len(chunk_thetas)}): {e}", flush=True)
