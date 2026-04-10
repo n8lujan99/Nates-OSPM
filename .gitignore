@@ -11,6 +11,7 @@ Data/Gal_Profiles/**/Testing/
 Data/Gal_Profiles/**/checkpoint/
 Data/Gal_Profiles/**/logs/
 Data/Gal_Profiles/Draco/Draco_OSPM_Config.py
+Data/Gal_Profiles/Segue1/default/archive/
 # Windows NTFS alternate data streams
 *:Zone.Identifier
 *Zone.Identifier
