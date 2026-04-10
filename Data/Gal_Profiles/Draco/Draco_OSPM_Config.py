@@ -51,7 +51,7 @@ CONFIG = {
     "DEC_COL":         "dec",
     "VLOS_COL":        "vlos",
 
-    "NORBIT":              2500, 
+    "NORBIT":              1000, 
     "BINNING": {
         "MIN_BINS":            5,
         "N_TARGET_CIRC":       5,
@@ -66,11 +66,11 @@ CONFIG = {
     # =========================================================
     # Parameter space — UPDATED (Draco tuned box)
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA": [3, 1800.0, 9e5],
+    "INITIAL_THETA": [1, 1800.0, 9e5],
     "THETA_BOUNDS": [
-       (2.0, 15.0),      # rho_s  → high-density basin only
-       (1800.0, 8000.0),    # r_s    → keep basin width
-       (5.5e5, 5e6),    # MBH    → upper cluster region
+       (0.01, 15.0),      # rho_s  → high-density basin only
+       (0, 15000.0),    # r_s    → keep basin width
+       (0, 5e6),    # MBH    → upper cluster region
     ],
     "PEN_SPHERE_STRENGTH": 200,
     "PEN_SPHERE_POWER":    2.0,
@@ -87,13 +87,13 @@ CONFIG = {
     "FILL_DEFAULT_STATUS": "todo",
 
     "BATCH_SIZE":          WORKERS,
-    "MIN_BATCH_SIZE":      16,
-    "MAX_BATCH_SIZE":      400,
-    "_PRINT_EVERY":        1,
+    "MIN_BATCH_SIZE":      90,
+    "MAX_BATCH_SIZE":      260,
+    "_PRINT_EVERY":        10,
     "_print_counter":      0,
 
-    "AI_START_AFTER":        200,
-    "MIN_TRAIN_POINTS":      200,
+    "AI_START_AFTER":        400,
+    "MIN_TRAIN_POINTS":      300,
     "TRAIN_WINDOW":          3000,
     "AI_NOISE_INIT":         0.30,
     "AI_NOISE_MIN":          0.02,
@@ -115,6 +115,6 @@ CONFIG = {
     "G":    6.67430e-11,
     "Msun": 1.98847e30,
     **build_data_paths(PROFILE_ROOT),
-    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_local.csv"), # This creates the new local deck this is the only difference
+    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_clusterML.csv"), # This creates the new local deck this is the only difference
 }
 print("[CONFIG] CSV_PATH =", CONFIG["CSV_PATH"])
