@@ -9,6 +9,8 @@ import multiprocessing as mp
 from Data.Data_Prep.Data_Paths import build_data_paths
 
 Galaxy = "Draco"
+# Run mode toggle
+LOCAL_DEBUG = False   # True = local responsive run, False = full run / HPC-style
 
 PROFILE_ROOT = Path(__file__).resolve().parent
 if not PROFILE_ROOT.exists():
@@ -21,6 +23,18 @@ def detect_workers():
     return mp.cpu_count()
 
 WORKERS = detect_workers()
+
+
+# Mode-dependent knobs
+NORBIT = 1000 if LOCAL_DEBUG else 1500
+BATCH_SIZE = 40 if LOCAL_DEBUG else 90
+MIN_BATCH_SIZE = 40 if LOCAL_DEBUG else 90
+MAX_BATCH_SIZE = 120 if LOCAL_DEBUG else 270
+CHUNK_SIZE = 30 if LOCAL_DEBUG else 90
+LOG_INTERVAL = 1 if LOCAL_DEBUG else 10
+PROF_EVERY = 2 if LOCAL_DEBUG else 20
+EVAL_TIMEOUT_S = 20.0 if LOCAL_DEBUG else 600.0
+
 
 CONFIG = {
     "N_WORKERS": WORKERS,
@@ -65,12 +79,13 @@ CONFIG = {
 
     # =========================================================
     # Parameter space — UPDATED (Draco tuned box)
-    "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA": [1, 1800.0, 9e5],
+    "PARAMETER_NAMES": ["rho_s", "r_s", "MBH", "ML"],
+    "INITIAL_THETA": [1, 1800.0, 9e5, 2.0],
     "THETA_BOUNDS": [
        (0.01, 15.0),      # rho_s  → high-density basin only
        (0, 15000.0),    # r_s    → keep basin width
        (0, 5e6),    # MBH    → upper cluster region
+       (0.2, 2.0),  # ML     → mass-to-light ratio
     ],
     "PEN_SPHERE_STRENGTH": 200,
     "PEN_SPHERE_POWER":    2.0,
@@ -86,9 +101,10 @@ CONFIG = {
     "ALLOWED_STATUSES": [ "todo", "seed", "pass", "orbit_fail", "numeric_fail", "unknown_fail", "forbidden" ],
     "FILL_DEFAULT_STATUS": "todo",
 
-    "BATCH_SIZE":          WORKERS,
-    "MIN_BATCH_SIZE":      90,
-    "MAX_BATCH_SIZE":      260,
+    "BATCH_SIZE":          BATCH_SIZE,
+    "MIN_BATCH_SIZE":      MIN_BATCH_SIZE,
+    "MAX_BATCH_SIZE":      MAX_BATCH_SIZE,
+    "CHUNK_SIZE":          CHUNK_SIZE,
     "_PRINT_EVERY":        10,
     "_print_counter":      0,
 

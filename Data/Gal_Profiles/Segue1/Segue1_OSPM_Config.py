@@ -3,6 +3,9 @@
 # so all other modules remain galaxy-agnostic
 
 from pathlib import Path
+import pathlib
+import os
+import multiprocessing as mp
 from Data.Data_Prep.Data_Paths import build_data_paths
 
 Galaxy = "Segue1"
@@ -15,21 +18,30 @@ PROFILE_ROOT = Path(__file__).resolve().parent
 if not PROFILE_ROOT.exists():
     raise FileNotFoundError(f"PROFILE_ROOT does not exist: {PROFILE_ROOT}")
 
+
+def detect_workers():
+    slurm = os.getenv("SLURM_CPUS_PER_TASK")
+    if slurm and slurm.isdigit():
+        return int(slurm)
+    return mp.cpu_count()
+
+WORKERS = detect_workers()
+
 # Mode-dependent knobs
-NORBIT = 800 if LOCAL_DEBUG else 2500
-BATCH_SIZE = 12 if LOCAL_DEBUG else 80
-MIN_BATCH_SIZE = 12 if LOCAL_DEBUG else 80
-MAX_BATCH_SIZE = 24 if LOCAL_DEBUG else 256
-CHUNK_SIZE = 12 if LOCAL_DEBUG else 90
+NORBIT = 1000 if LOCAL_DEBUG else 1500
+BATCH_SIZE = 40 if LOCAL_DEBUG else 90
+MIN_BATCH_SIZE = 40 if LOCAL_DEBUG else 90
+MAX_BATCH_SIZE = 120 if LOCAL_DEBUG else 270
+CHUNK_SIZE = 30 if LOCAL_DEBUG else 90
 LOG_INTERVAL = 1 if LOCAL_DEBUG else 10
-PROF_EVERY = 2 if LOCAL_DEBUG else 25
-EVAL_TIMEOUT_S = 20.0 if LOCAL_DEBUG else 120.0
+PROF_EVERY = 2 if LOCAL_DEBUG else 20
+EVAL_TIMEOUT_S = 20.0 if LOCAL_DEBUG else 600.0
 
 CONFIG = {
     # =========================================================
     # Parallelization
     # =========================================================
-    "N_WORKERS": 24,
+    "N_WORKERS": WORKERS,
 
     # =========================================================
     # Identity
@@ -90,11 +102,11 @@ CONFIG = {
     # Parameter space
     # =========================================================
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH", "ML"],
-    "INITIAL_THETA":   [37.37, 1987.0, 5e5, 2.0],
+    "INITIAL_THETA":   [0.01, 300.0, 5e5, 2.0],
     "THETA_BOUNDS": [
-        (0.5, 400.0),
-        (300, 10000.0),
-        (0.0, 5e6),
+        (0.01, 400.0),
+        (0, 10000.0),
+        (0.0, 4e6),
         (0.2, 2.0),
     ],
 
@@ -161,7 +173,7 @@ CONFIG = {
     # Paths (authoritative)
     # =========================================================
     **build_data_paths(PROFILE_ROOT),
-    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_local.csv"),
+    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_clusterML.csv"),
 }
 
 print("[CONFIG] CSV_PATH =", CONFIG["CSV_PATH"])
