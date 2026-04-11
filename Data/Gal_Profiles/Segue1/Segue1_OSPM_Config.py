@@ -173,7 +173,7 @@ CONFIG = {
     # Paths (authoritative)
     # =========================================================
     **build_data_paths(PROFILE_ROOT),
-    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_clusterML.csv"),
+    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_cluster_ML2500.csv"),
 }
 
 print("[CONFIG] CSV_PATH =", CONFIG["CSV_PATH"])
