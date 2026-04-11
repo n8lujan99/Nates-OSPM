@@ -28,7 +28,7 @@ def detect_workers():
 WORKERS = detect_workers()
 
 # Mode-dependent knobs
-NORBIT = 1000 if LOCAL_DEBUG else 1500
+NORBIT = 1000 if LOCAL_DEBUG else 2500
 BATCH_SIZE = 40 if LOCAL_DEBUG else 90
 MIN_BATCH_SIZE = 40 if LOCAL_DEBUG else 90
 MAX_BATCH_SIZE = 120 if LOCAL_DEBUG else 270
