@@ -65,7 +65,7 @@ CONFIG = {
     "DEC_COL":         "dec",
     "VLOS_COL":        "vlos",
 
-    "NORBIT":              1000, 
+    "NORBIT":              NORBIT, 
     "BINNING": {
         "MIN_BINS":            5,
         "N_TARGET_CIRC":       5,
@@ -97,7 +97,7 @@ CONFIG = {
     "POTENTIAL_EXTENT":         10.0,
     "BH_MIN_RADIUS_MULTIPLIER": 2.0,
 
-    "REQUIRE_COLUMNS": ["rho_s", "r_s", "MBH", "chi2", "reward", "status", "proposal_id"],
+    "REQUIRE_COLUMNS": ["rho_s", "r_s", "MBH", "ML", "chi2", "reward", "status", "proposal_id" ],
     "ALLOWED_STATUSES": [ "todo", "seed", "pass", "orbit_fail", "numeric_fail", "unknown_fail", "forbidden" ],
     "FILL_DEFAULT_STATUS": "todo",
 

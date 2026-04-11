@@ -100,6 +100,12 @@ class Deck:
         missing = [c for c in self.cols if c not in df.columns]
         if missing: raise KeyError(f"Deck missing required columns: {missing}")
         self.df = df[self.cols].copy()
+        print("DECK LOAD DEBUG")
+        print("path:", self.path)
+        print("params:", self.params)
+        print("columns:", self.df.columns.tolist())
+        print("head:")
+        print(self.df.head().to_string())
         self._params_arr = self.df[self.params].values.astype(float)
         self._status_arr = self.df["status"].values.astype(str)
 
