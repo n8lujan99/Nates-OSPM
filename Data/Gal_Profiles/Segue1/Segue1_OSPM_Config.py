@@ -28,7 +28,7 @@ def detect_workers():
 WORKERS = detect_workers()
 
 # Mode-dependent knobs
-NORBIT = 1000 if LOCAL_DEBUG else 2500
+NORBIT = 1000 if LOCAL_DEBUG else 10000
 BATCH_SIZE = 40 if LOCAL_DEBUG else 90
 MIN_BATCH_SIZE = 40 if LOCAL_DEBUG else 90
 MAX_BATCH_SIZE = 120 if LOCAL_DEBUG else 270
@@ -173,7 +173,7 @@ CONFIG = {
     # Paths (authoritative)
     # =========================================================
     **build_data_paths(PROFILE_ROOT),
-    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_cluster_ML2500.csv"),
+    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_cluster_ML10000.csv"),
 }
 
 print("[CONFIG] CSV_PATH =", CONFIG["CSV_PATH"])
