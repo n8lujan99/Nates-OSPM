@@ -80,10 +80,10 @@ CONFIG = {
     # =========================================================
     # Parameter space — UPDATED (Draco tuned box)
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH", "ML"],
-    "INITIAL_THETA": [1, 1800.0, 9e5, 2.0],
+    "INITIAL_THETA": [1, 1800.0, 9e5, 1.0],
     "THETA_BOUNDS": [
-       (0.01, 15.0),      # rho_s  → high-density basin only
-       (0, 15000.0),    # r_s    → keep basin width
+       (0.1, 1000.0),      # rho_s  → high-density basin only
+       (100, 10000.0),    # r_s    → keep basin width
        (0, 5e6),    # MBH    → upper cluster region
        (0.2, 2.0),  # ML     → mass-to-light ratio
     ],
@@ -131,6 +131,6 @@ CONFIG = {
     "G":    6.67430e-11,
     "Msun": 1.98847e30,
     **build_data_paths(PROFILE_ROOT),
-    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_clusterM2500L.csv"), # This creates the new local deck this is the only difference
+    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_ML2500oldbounds.csv"), # This creates the new local deck this is the only difference
 }
 print("[CONFIG] CSV_PATH =", CONFIG["CSV_PATH"])
