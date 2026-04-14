@@ -26,7 +26,7 @@ WORKERS = detect_workers()
 
 
 # Mode-dependent knobs
-NORBIT = 1000 if LOCAL_DEBUG else 1500
+NORBIT = 1000 if LOCAL_DEBUG else 2500
 BATCH_SIZE = 40 if LOCAL_DEBUG else 90
 MIN_BATCH_SIZE = 40 if LOCAL_DEBUG else 90
 MAX_BATCH_SIZE = 120 if LOCAL_DEBUG else 270
@@ -131,6 +131,6 @@ CONFIG = {
     "G":    6.67430e-11,
     "Msun": 1.98847e30,
     **build_data_paths(PROFILE_ROOT),
-    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_clusterML.csv"), # This creates the new local deck this is the only difference
+    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_clusterM2500L.csv"), # This creates the new local deck this is the only difference
 }
 print("[CONFIG] CSV_PATH =", CONFIG["CSV_PATH"])
