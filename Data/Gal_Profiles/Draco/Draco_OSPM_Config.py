@@ -82,7 +82,7 @@ CONFIG = {
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH", "ML"],
     "INITIAL_THETA": [1, 1800.0, 9e5, 1.0],
     "THETA_BOUNDS": [
-       (0.1, 1000.0),      # rho_s  → high-density basin only
+       (0.1, 6.0),      # rho_s  → high-density basin only
        (100, 10000.0),    # r_s    → keep basin width
        (0, 5e6),    # MBH    → upper cluster region
        (0.2, 2.0),  # ML     → mass-to-light ratio

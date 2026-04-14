@@ -104,7 +104,7 @@ CONFIG = {
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH", "ML"],
     "INITIAL_THETA":   [0.1, 300.0, 5e5, 2.0],
     "THETA_BOUNDS": [
-        (0.1, 300.0),
+        (0.1, 5.0),
         (100, 5000.0),
         (0.0, 2e6),
         (0.2, 1.6),
