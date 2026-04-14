@@ -55,6 +55,11 @@ from unittest import runner
 import numpy as np, pandas as pd
 import torch, torch.nn as nn
 from collections import deque
+try:
+    from .halobounds import HaloBounds
+except ImportError:
+    from halobounds import HaloBounds
+
 torch.backends.cudnn.benchmark = False
 try: from sklearn.preprocessing import StandardScaler
 except Exception: StandardScaler = None
@@ -157,7 +162,6 @@ class Fixer:
             runner.enable_ai(); self.unlocked = True; print("[AI] unlocked", flush=True)
     def reward(self, status, chi2): return -1e6 if status != "pass" else -float(chi2)
 
-
 class FlatDetector:
     def __init__(self, w, eps, p):
         self.w, self.eps, self.p = w, eps, p; self.buf = deque(maxlen=w); self.cnt = 0
@@ -167,7 +171,6 @@ class FlatDetector:
         if len(self.buf) < self.w: self.cnt = 0; return
         self.cnt = self.cnt + 1 if np.std(self.buf) < self.eps and np.isfinite(x) else 0
     def flat(self): return self.cnt >= self.p
-
 
 class ConvergenceDetector:
     def __init__(self, cfg, bounds, cols):
@@ -377,8 +380,7 @@ def run_daemon(config, physics_engine):
                         juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps),
                         juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
                         sini, Norbit, halo_type, stellar_model=getattr(obs, "stellar_model", None),
-                        Nocc=NBINS_OCC, lambda_occ=LAMBDA_OCC, max_refine=config.get("MAX_REFINE", 0), timeout_s=float(config.get("EVAL_TIMEOUT_S", 120.0)),
-)
+                        Nocc=NBINS_OCC, lambda_occ=LAMBDA_OCC, max_refine=config.get("MAX_REFINE", 0), timeout_s=float(config.get("EVAL_TIMEOUT_S", 120.0)))
                     t_acc["eval"] += time.perf_counter() - chunk_t0; t_cnt["eval"] += len(chunk_thetas)
                     for j, (theta, pid, label) in enumerate(chunk_props):
                         chi2, code, refine_passes = float(chi2_vec[j]), int(status_code_vec[j]), int(refine_vec[j])

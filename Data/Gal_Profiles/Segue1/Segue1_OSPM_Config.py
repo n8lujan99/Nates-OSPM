@@ -28,7 +28,7 @@ def detect_workers():
 WORKERS = detect_workers()
 
 # Mode-dependent knobs
-NORBIT = 1000 if LOCAL_DEBUG else 10000
+NORBIT = 1000 if LOCAL_DEBUG else 2500
 BATCH_SIZE = 40 if LOCAL_DEBUG else 90
 MIN_BATCH_SIZE = 40 if LOCAL_DEBUG else 90
 MAX_BATCH_SIZE = 120 if LOCAL_DEBUG else 270
@@ -102,12 +102,12 @@ CONFIG = {
     # Parameter space
     # =========================================================
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH", "ML"],
-    "INITIAL_THETA":   [0.01, 300.0, 5e5, 2.0],
+    "INITIAL_THETA":   [0.1, 300.0, 5e5, 2.0],
     "THETA_BOUNDS": [
-        (0.01, 400.0),
-        (0, 10000.0),
-        (0.0, 4e6),
-        (0.2, 2.0),
+        (0.1, 300.0),
+        (100, 5000.0),
+        (0.0, 2e6),
+        (0.2, 1.6),
     ],
 
     # Penalties
@@ -173,7 +173,7 @@ CONFIG = {
     # Paths (authoritative)
     # =========================================================
     **build_data_paths(PROFILE_ROOT),
-    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_cluster_ML10000.csv"),
+    "CSV_PATH": str(PROFILE_ROOT / "default" / "daemon_deck_oldbounds.csv"),
 }
 
 print("[CONFIG] CSV_PATH =", CONFIG["CSV_PATH"])
