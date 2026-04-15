@@ -104,10 +104,10 @@ CONFIG = {
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH", "ML"],
     "INITIAL_THETA":   [0.1, 300.0, 5e5, 2.0],
     "THETA_BOUNDS": [
-        (0.1, 5.0),
-        (100, 5000.0),
-        (0.0, 2e6),
-        (0.2, 1.6),
+        (0.1, 5.0), # rho_s must be lower than 6 to avoid over massive halos that could look like smbhs
+        (100, 5000.0), # r_s in pc 100 pc = 0.1 kpc the min used in lujan 2025
+        (0.0, 2e6), # MBH solar masses 0 to 2 million
+        (0.2, 1.6), # ML solar mass / solar luminosity 0.2 to 2 used in lujan 2025
     ],
 
     # Penalties

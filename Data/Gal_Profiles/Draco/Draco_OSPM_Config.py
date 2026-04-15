@@ -82,10 +82,10 @@ CONFIG = {
     "PARAMETER_NAMES": ["rho_s", "r_s", "MBH", "ML"],
     "INITIAL_THETA": [1, 1800.0, 9e5, 1.0],
     "THETA_BOUNDS": [
-       (0.1, 6.0),      # rho_s  → high-density basin only
-       (100, 10000.0),    # r_s    → keep basin width
-       (0, 5e6),    # MBH    → upper cluster region
-       (0.2, 2.0),  # ML     → mass-to-light ratio
+       (0, 6.0),      # rho_s must be lower than 6 to avoid over massive halos that could look like smbhs
+       (100, 10000.0),    # r_s in pc 100 pc = 0.1 kpc the min used in lujan 2025
+       (0, 5e6),    # MBH solar masses 0 to 5 million
+       (0.2, 2.0),  # ML solar mass / solar luminosity 0.2 to 2 used in lujan 2025
     ],
     "PEN_SPHERE_STRENGTH": 200,
     "PEN_SPHERE_POWER":    2.0,
