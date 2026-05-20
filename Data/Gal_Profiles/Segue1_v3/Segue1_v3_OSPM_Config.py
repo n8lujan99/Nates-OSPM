@@ -71,12 +71,13 @@ CONFIG = {
     # =========================================================
     # Parameter space (same as production)
     # =========================================================
-    "PARAMETER_NAMES": ["rho_s", "r_s", "MBH"],
-    "INITIAL_THETA":   [37.37, 1759.0, 1.2e5],
+    "PARAMETER_NAMES": ["rho_s", "r_s", "MBH", "ML"],
+    "INITIAL_THETA":   [37.37, 1759.0, 1.2e5, 2],
     "THETA_BOUNDS": [
         (0.0, 100.0),     # rho_s
         (300, 5000.0),    # r_s
         (0.0, 1.5e6),      # MBH
+        (0.1, 100.0),       # ML
     ],
 
     "PEN_SPHERE_STRENGTH": 2500,
