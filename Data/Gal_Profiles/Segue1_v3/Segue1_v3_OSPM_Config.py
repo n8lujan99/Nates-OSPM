@@ -77,7 +77,7 @@ CONFIG = {
         (0.0, 100.0),     # rho_s
         (300, 5000.0),    # r_s
         (0.0, 1.5e6),      # MBH
-        (0.1, 100.0),       # ML
+        (0.2, 2.0),       # ML
     ],
 
     "PEN_SPHERE_STRENGTH": 2500,
@@ -96,7 +96,7 @@ CONFIG = {
     # =========================================================
     # Deck semantics
     # =========================================================
-    "REQUIRE_COLUMNS": ["rho_s", "r_s", "MBH", "chi2", "reward", "status", "proposal_id"],
+    "REQUIRE_COLUMNS": ["rho_s", "r_s", "MBH", "ML", "chi2", "reward", "status", "proposal_id"],
     "ALLOWED_STATUSES": ["todo", "seed", "pass", "orbit_fail", "numeric_fail", "unknown_fail", "forbidden"],
     "FILL_DEFAULT_STATUS": "todo",
 
@@ -143,9 +143,10 @@ CONFIG = {
     "Msun": 1.98847e30,
 
     # =========================================================
-    # Paths — read v3 data, write to v3 deck
+    # Paths — read v3 Walker-cleaned data, write to v3 deck
     # =========================================================
     **build_data_paths(SEGUE1_ROOT, run_label="v3"),
+    "DATA_CSV": str(SEGUE1_ROOT / "v3" / "segue1_walker2023_clean.csv"),
     "CSV_PATH": str(SEGUE1_ROOT / "v3" / "daemon_deck_v3.csv"),
 }
-print("[CONFIG] Segue1_v3 probe run | NORBIT=500 | data:", CONFIG["DATA_CSV"])
+print("[CONFIG] Segue1_v3 probe run | NORBIT=2500 | data:", CONFIG["DATA_CSV"])
