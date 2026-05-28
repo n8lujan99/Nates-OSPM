@@ -491,6 +491,43 @@ function stellar_log_likelihood_jl(A::Matrix{Float64}, w::Vector{Float64}, verr:
     return ll
 end
 
+function stellar_log_likelihood_parts_jl(
+    A::Matrix{Float64},
+    w::Vector{Float64},
+    verr::Vector{Float64};
+    rv_mask::Union{Vector{Bool},Nothing}=nothing,
+    lambda_occ::Float64=0.0,
+    Nocc::Int=0,
+    eps::Float64=DEFAULT_LOG_EPS,
+    sigma_floor_mps::Float64=DEFAULT_SIGMA_FLOOR_MPS,
+)
+    Nstar = size(A, 1) - Nocc
+    p = A * w
+
+    ll_rows = zeros(Float64, max(Nstar, 0))
+    ll_occ = 0.0
+
+    if Nstar > 0
+        mask = rv_mask !== nothing ? rv_mask : convert(Vector{Bool}, trues(Nstar))
+
+        @inbounds for i in 1:Nstar
+            if mask[i]
+                sig = max(verr[i], sigma_floor_mps)
+                pv  = max(p[i] * sig, eps)
+                ll_rows[i] = log(pv)
+            end
+        end
+    end
+
+    if Nocc > 0
+        @inbounds for i in (Nstar + 1):(Nstar + Nocc)
+            ll_occ += lambda_occ * log(max(p[i], eps))
+        end
+    end
+
+    return ll_rows, ll_occ
+end
+
 function solve_weights_stellar_jl(A::Matrix{Float64}, verr::Vector{Float64}; rv_mask::Union{Vector{Bool},Nothing}=nothing, Nocc::Int=0, lambda_occ::Float64=0.0, alpha::Float64=DEFAULT_ALPHA, maxiter::Int=DEFAULT_MAXITER, eps::Float64=DEFAULT_LOG_EPS, sigma_floor_mps::Float64=DEFAULT_SIGMA_FLOOR_MPS, seed::UInt=UInt(0))
     Nstar  = size(A, 1) - Nocc
     Norbit = size(A, 2)

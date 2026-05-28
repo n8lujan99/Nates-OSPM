@@ -96,19 +96,20 @@ CONFIG = {
     # =========================================================
     # Deck semantics
     # =========================================================
-    "REQUIRE_COLUMNS": ["rho_s", "r_s", "MBH", "ML", "chi2", "reward", "status", "proposal_id"],
+    "REQUIRE_COLUMNS": [ "rho_s", "r_s", "MBH", "ML", "chi2", "chi2_inner", "chi2_outer", "chi2_occ", "N_inner", "N_outer", 
+                        "N_nonzero_weights", "effective_N_orbits", "max_weight_fraction", "reward", "status", "proposal_id", "refine_passes"],
     "ALLOWED_STATUSES": ["todo", "seed", "pass", "orbit_fail", "numeric_fail", "unknown_fail", "forbidden"],
     "FILL_DEFAULT_STATUS": "todo",
 
     # =========================================================
     # Sampling & control
     # =========================================================
-    "BATCH_SIZE":          80,
-    "MIN_BATCH_SIZE":      80,
+    "BATCH_SIZE":          80, # 80
+    "MIN_BATCH_SIZE":      80, # 80
     "MAX_BATCH_SIZE":      256,
     "_PRINT_EVERY":        10,
     "_print_counter":      1,
-
+    "R_INNER_DIAG_PC":     30.0,
     # =========================================================
     # AI / learning
     # =========================================================
@@ -131,7 +132,7 @@ CONFIG = {
     # =========================================================
     # Termination
     # =========================================================
-    "MAX_RUNS":              100000,
+    "MAX_RUNS":              10000, # 10000
     "STOP_NO_IMPROVEMENT":   1000,
     "IMPROVEMENT_EPSILON":   1e-6,
     "LOG_INTERVAL":          10,
@@ -147,6 +148,6 @@ CONFIG = {
     # =========================================================
     **build_data_paths(SEGUE1_ROOT, run_label="v3"),
     "DATA_CSV": str(SEGUE1_ROOT / "v3" / "segue1_walker2023_clean.csv"),
-    "CSV_PATH": str(SEGUE1_ROOT / "v3" / "daemon_deck_v3.csv"),
+    "CSV_PATH": str(SEGUE1_ROOT / "v3" / "daemon_deck_v3_diag.csv"),
 }
 print("[CONFIG] Segue1_v3 probe run | NORBIT=2500 | data:", CONFIG["DATA_CSV"])

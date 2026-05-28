@@ -137,13 +137,21 @@ class Deck:
         A = self._all_params(); m = np.all(np.abs(A - theta) < tol, axis=1)
         return np.linalg.norm(A[m] - theta, axis=1).min() if m.any() else np.inf
 
-    def add(self, theta, chi2, reward, pid, status, refine_passes=None):
+    def add(self, theta, chi2, reward, pid, status, refine_passes=None, diag=None):
         row_dict = {k: theta[i] for i, k in enumerate(self.params)}
-        row_dict |= dict(chi2=chi2, reward=reward, status=status, proposal_id=pid, refine_passes=refine_passes)
+        row_dict |= dict( chi2=chi2, reward=reward, status=status, proposal_id=pid, refine_passes=refine_passes)
+        if diag is not None:
+            row_dict.update(diag)
         self._buf.append([row_dict.get(k) for k in self.cols])
         self._pbuf.append([theta[i] for i in range(len(self.params))])
-        self._sbuf.append(status); self._dirty += 1
-        if self._dirty >= self.flush: self._flush_buf(); self.save(); self._dirty = 0
+        self._sbuf.append(status)
+        self._dirty += 1
+        if self._dirty >= self.flush:
+            self._flush_buf()
+            self.save()
+            self._dirty = 0
+
+        
 class Corpo:
     def __init__(self, engine): self.engine = engine
     def eval(self, theta):
@@ -340,12 +348,12 @@ def run_daemon(config, physics_engine):
         _nthreads = (os.cpu_count() or 1) if _jnt == "auto" else int(_jnt)
         CHUNK = int(config.get("CHUNK_SIZE", max(3 * _nthreads, len(props))))
 
-        def _record(theta, pid, label, status, chi2, refine_passes):
+        def _record(theta, pid, label, status, chi2, refine_passes, diag=None):
             nonlocal best, runs
             base_reward = fixer.reward(status, chi2)
             reward = base_reward + 0.5 * (1.0 - refine_passes / max(1, config.get("MAX_REFINE", 1))) if status == "pass" else base_reward
             t_add = time.perf_counter()
-            deck.add(theta, chi2, reward, pid, f"{status}_{label}", refine_passes=refine_passes)
+            deck.add(theta, chi2, reward, pid, f"{status}_{label}", refine_passes=refine_passes, diag=diag)
             t_acc["add"] += time.perf_counter() - t_add; t_cnt["add"] += 1
             valid_pass = (status == "pass") and np.isfinite(chi2) and (chi2 > 1e-12)
             if valid_pass:
@@ -373,21 +381,50 @@ def run_daemon(config, physics_engine):
                 theta_mat = np.array(chunk_thetas, dtype=float).T; chunk_t0 = time.perf_counter()
                 try:
                     NBINS_OCC, LAMBDA_OCC = config["OBSERVABLES"]["NBINS_OCC"], config["OBSERVABLES"]["LAMBDA_OCC"]
-                    status_code_vec, chi2_vec, refine_vec = jl_batch(
+                    (
+                        status_code_vec,
+                        chi2_vec,
+                        refine_vec,
+                        chi2_inner_vec,
+                        chi2_outer_vec,
+                        chi2_occ_vec,
+                        N_inner_vec,
+                        N_outer_vec,
+                        N_nonzero_weights_vec,
+                        effective_N_orbits_vec,
+                        max_weight_fraction_vec,
+                    ) = jl_batch(
                         juliacall.convert(Main.Matrix[Main.Float64], theta_mat),
                         juliacall.convert(Main.Vector[Main.Float64], obs.R_star_m),
                         juliacall.convert(Main.Vector[Main.Bool], obs.valid_vlos),
                         juliacall.convert(Main.Vector[Main.Float64], obs.v_star_mps),
                         juliacall.convert(Main.Vector[Main.Float64], obs.verr_star_mps),
-                        sini, Norbit, halo_type, stellar_model=getattr(obs, "stellar_model", None),
-                        Nocc=NBINS_OCC, lambda_occ=LAMBDA_OCC, max_refine=config.get("MAX_REFINE", 0), timeout_s=float(config.get("EVAL_TIMEOUT_S", 120.0)))
+                        sini,
+                        Norbit,
+                        halo_type,
+                        stellar_model=getattr(obs, "stellar_model", None),
+                        Nocc=NBINS_OCC,
+                        lambda_occ=LAMBDA_OCC,
+                        max_refine=config.get("MAX_REFINE", 0),
+                        timeout_s=float(config.get("EVAL_TIMEOUT_S", 120.0)),
+                        R_inner_pc=float(config.get("R_INNER_DIAG_PC", 30.0)),
+                    )
                     t_acc["eval"] += time.perf_counter() - chunk_t0; t_cnt["eval"] += len(chunk_thetas)
                     for j, (theta, pid, label) in enumerate(chunk_props):
-                        chi2, code, refine_passes = float(chi2_vec[j]), int(status_code_vec[j]), int(refine_vec[j])
+                        chi2 = float(chi2_vec[j])
+                        code = int(status_code_vec[j])
+                        refine_passes = int(refine_vec[j])
                         valid_pass = (code == 0) and np.isfinite(chi2) and (chi2 > 1e-12)
                         status = "pass" if valid_pass else {1: "orbit_fail", 2: "numeric_fail", 4: "timeout"}.get(code, "unknown_fail")
-                        if not valid_pass: chi2 = np.inf
-                        if _record(theta, pid, label, status, chi2, refine_passes): stop = True; break
+                        diag = dict( chi2_inner=float(chi2_inner_vec[j]), chi2_outer=float(chi2_outer_vec[j]), chi2_occ=float(chi2_occ_vec[j]), 
+                                    N_inner=int(N_inner_vec[j]), N_outer=int(N_outer_vec[j]), N_nonzero_weights=int(N_nonzero_weights_vec[j]), 
+                                    effective_N_orbits=float(effective_N_orbits_vec[j]), max_weight_fraction=float(max_weight_fraction_vec[j]))
+
+                        if not valid_pass:
+                            chi2 = np.inf
+                        if _record(theta, pid, label, status, chi2, refine_passes, diag=diag):
+                            stop = True
+                            break
                 except Exception as e:
                     t_acc["eval"] += time.perf_counter() - chunk_t0; t_cnt["eval"] += len(chunk_thetas)
                     print(f"[Daemon] chunk failed (size={len(chunk_thetas)}): {e}", flush=True)
